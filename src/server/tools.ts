@@ -23,7 +23,7 @@ import {
 } from "../core/store.ts";
 import { callDaemon } from "../daemon/client.ts";
 import type { SendResult } from "../daemon/adapters/types.ts";
-import { bindThread, createOptions, projectForThread, rememberProject, snapshot } from "./state.ts";
+import { bindThread, coordinatorThread, createOptions, projectForThread, rememberProject, snapshot } from "./state.ts";
 
 
 const ICON_SVG =
@@ -484,15 +484,17 @@ export function registerTools(server: McpServer, html: string): void {
     "ui_coordinator",
     {
       title: "Coordinator chat",
-      description: "Find the project's coordinator thread and the kickoff message to start one.",
+      description: "Find the project's coordinator thread, moving it into the project's repository folder if needed, or a link that starts one there.",
       inputSchema: z.object({ project: z.string() }),
-      annotations: readOnly,
       _meta: appOnly,
     },
     async ({ project }) => {
       const record = await resolveProject(project);
       await rememberProject(record.slug);
-      return text("coordinator", { threadId: record.coordinatorThreadId ?? null, kickoff: COORDINATOR_KICKOFF(record.name, record.slug) });
+      const kickoff = COORDINATOR_KICKOFF(record.name, record.slug);
+      const params = new URLSearchParams({ prompt: kickoff });
+      if (record.repos[0]) params.set("path", record.repos[0]);
+      return text("coordinator", { threadId: (await coordinatorThread(record.slug)) ?? null, kickoff, newThreadUrl: `codex://threads/new?${params}` });
     },
   );
 

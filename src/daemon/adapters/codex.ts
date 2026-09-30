@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import type { AgentRecord, ModelOption, TranscriptItem } from "../../shared/types.ts";
 import { agentKey, type AdapterHooks, type HarnessAdapter, type SendResult } from "./types.ts";
+import { withAppServer } from "./oneshot.ts";
 
 const run = promisify(execFile);
 
@@ -367,6 +368,36 @@ export class CodexAdapter implements HarnessAdapter {
     if (read.thread?.name === name) return { renamed: false };
     await this.call("thread/name/set", { threadId, name });
     return { renamed: true };
+  }
+
+  async archiveThread(threadId: string): Promise<{ archived: boolean }> {
+    try {
+      await withAppServer(this.binary, this.version, (call) => call("thread/archive", { threadId }));
+      return { archived: true };
+    } catch {
+      return { archived: false };
+    }
+  }
+
+  async relocateThread(threadId: string, cwd: string, name: string): Promise<{ threadId: string; moved: boolean; archived: boolean }> {
+    return withAppServer(this.binary, this.version, async (call) => {
+      const read: Json = await call("thread/read", { threadId, includeTurns: false });
+      const thread = read.thread;
+      if (!thread) throw new Error(`Thread ${threadId} was not found.`);
+      if (!existsSync(cwd) || path.resolve(thread.cwd ?? "") === path.resolve(cwd)) {
+        if (thread.name !== name) await call("thread/name/set", { threadId, name });
+        return { threadId, moved: false, archived: false };
+      }
+      const fork: Json = await call("thread/fork", { threadId, cwd }, 90_000);
+      const next: string | undefined = fork.thread?.id;
+      if (!next) throw new Error("Codex did not return the moved thread.");
+      await call("thread/name/set", { threadId: next, name });
+      const archived = await call("thread/archive", { threadId }).then(
+        () => true,
+        () => false,
+      );
+      return { threadId: next, moved: true, archived };
+    });
   }
 
   async dispose(): Promise<void> {

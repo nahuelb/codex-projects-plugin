@@ -27,6 +27,17 @@ export async function codexAvailable(): Promise<boolean> {
 
 const uiStateFile = () => path.join(rootDir(), "run", "ui.json");
 const threadsFile = () => path.join(rootDir(), "run", "threads.json");
+const archiveFile = () => path.join(rootDir(), "run", "archive-pending.json");
+
+async function archiveLater(threadIds: string[]): Promise<void> {
+  const pending = new Set([...((await readJson<string[]>(archiveFile())) ?? []), ...threadIds]);
+  const left: string[] = [];
+  for (const threadId of pending) {
+    const result = await callDaemon<{ archived: boolean }>("thread.archive", { threadId }, 30_000).catch(() => ({ archived: false }));
+    if (!result.archived) left.push(threadId);
+  }
+  await writeJsonAtomic(archiveFile(), left);
+}
 
 export async function lastProject(): Promise<string | undefined> {
   return (await readJson<{ lastProject?: string }>(uiStateFile()))?.lastProject;
@@ -44,15 +55,39 @@ export async function projectForThread(threadId: string | undefined): Promise<st
   return undefined;
 }
 
+export const coordinatorThreadName = (name: string) => `Project Coordinator: ${name}`;
+
+async function mapThread(threadId: string, slug: string): Promise<void> {
+  const map = (await readJson<Record<string, string>>(threadsFile())) ?? {};
+  if (map[threadId] !== slug) await writeJsonAtomic(threadsFile(), { ...map, [threadId]: slug });
+}
+
+export async function coordinatorThread(slug: string): Promise<string | undefined> {
+  const project = await getProject(slug);
+  const threadId = project.coordinatorThreadId;
+  const repo = project.repos[0];
+  if (!threadId || !repo) return threadId;
+  try {
+    const moved = await callDaemon<{ threadId: string; moved: boolean; archived: boolean }>("thread.relocate", { threadId, cwd: repo, name: coordinatorThreadName(project.name) }, 90_000);
+    if (moved.moved) {
+      await updateProject(slug, { coordinatorThreadId: moved.threadId });
+      await mapThread(moved.threadId, slug);
+    }
+    void archiveLater(moved.moved && !moved.archived ? [threadId] : []).catch(() => undefined);
+    return moved.threadId;
+  } catch {
+    return threadId;
+  }
+}
+
 export async function bindThread(threadId: string | undefined, slug: string): Promise<void> {
   await rememberProject(slug);
   if (!threadId) return;
-  const map = (await readJson<Record<string, string>>(threadsFile())) ?? {};
-  if (map[threadId] !== slug) await writeJsonAtomic(threadsFile(), { ...map, [threadId]: slug });
+  await mapThread(threadId, slug);
   const project = await getProject(slug);
   if (project.coordinatorThreadId && project.coordinatorThreadId !== threadId) return;
   if (!project.coordinatorThreadId) await updateProject(slug, { coordinatorThreadId: threadId });
-  void callDaemon("thread.adopt", { threadId, name: project.name }, 30_000).catch(() => undefined);
+  void callDaemon("thread.adopt", { threadId, name: coordinatorThreadName(project.name) }, 30_000).catch(() => undefined);
 }
 
 let optionsCache: { at: number; models: ModelOption[]; workspaces: string[] } | undefined;

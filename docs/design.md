@@ -26,7 +26,8 @@ How Project Coordinator brings the ideas of Cursor Projects and Claude Code Proj
 
 ## Native to Codex
 
-- **Coordinator chats are Codex threads.** Create Project starts the coordinator in a new Codex chat. On its first tool call the plugin reads the thread id Codex sends, links the thread to the project and names it after the project.
+- **Coordinator chats are Codex threads.** Create Project opens a new Codex chat in the project's repository folder through `codex://threads/new?path=&prompt=`. On its first tool call the plugin reads the thread id Codex sends, links the thread to the project, and names it "Project Coordinator: <name>". A coordinator thread outside the repository folder is forked into it with `thread/fork` and the old thread is archived.
+- **The page chat is not a coordinator.** Codex gives every global page a chat and no way to hide it or pick its thread, so the page sends it a hidden note that points to each project's own chat.
 - **Workers are Codex threads.** Agents run through `codex app-server`, so each one appears in Codex and opens with **Open chat**.
 - **Plugin surfaces.** A Project Coordinator page in the sidebar with a New Project quick action, a Project panel beside any chat, and `@` mentions that attach a project's digest to a chat.
 - **Local first.** Everything lives in `~/.projects-coordinator`. Agents run on this machine with the user's signed-in Codex CLI.

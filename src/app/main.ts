@@ -24,7 +24,7 @@ interface Host {
   openLink(url: string): Promise<boolean>;
   message(text: string, target: "new" | "active"): Promise<boolean>;
   openFile(path: string): Promise<boolean>;
-  chatContext(text: string | null, title: string): Promise<boolean>;
+  pageNote(text: string): Promise<boolean>;
   fullscreen(): Promise<boolean>;
 }
 
@@ -109,22 +109,18 @@ const GROUPS: { id: AgentGroup; label: string }[] = [
 ];
 
 const root = document.getElementById("root")!;
-let chatProject: string | null | undefined;
+let pageNoteSent = false;
 
-function chatContextText(project: ProjectDetail["project"]): string {
-  return [
-    `This chat is the coordinator of the project "${project.name}" (slug: ${project.slug}).`,
-    `Use the $coordinator skill and call project_context with project "${project.slug}" before you answer.`,
-  ].join(" ");
-}
+const PAGE_CHAT_NOTE = [
+  "This chat sits on the Project Coordinator page. It is not the coordinator of any project.",
+  "Each project has its own coordinator chat that the user opens by clicking the project in the list on this page.",
+  "Do not call Project Coordinator tools here. If the user asks about a project or asks for project work, tell them to open that project from the list.",
+].join(" ");
 
-function syncChatContext(): void {
-  if (state.mode !== "home" || !host) return;
-  const project = state.selected ? current()?.project : undefined;
-  const slug = project?.slug ?? null;
-  if (slug === chatProject) return;
-  chatProject = slug;
-  void host.chatContext(project ? chatContextText(project) : null, project ? `Project: ${project.name}` : "");
+function syncPageNote(): void {
+  if (state.mode !== "home" || !host || pageNoteSent) return;
+  pageNoteSent = true;
+  void host.pageNote(PAGE_CHAT_NOTE);
 }
 let host: Host;
 
@@ -579,7 +575,7 @@ function homeView(): string {
     else body = projectPage(detail);
     const chat = detail.project.coordinatorThreadId
       ? `<button class="btn small" data-action="open-coordinator">${icon("chat", 13)}Open chat</button>`
-      : `<button class="btn small primary" data-action="chat-here">${icon("chat", 13)}Start coordinator</button>`;
+      : `<button class="btn small primary" data-action="open-coordinator">${icon("chat", 13)}Start coordinator</button>`;
     const head =
       page.kind === "project"
         ? `<header class="pdetail-head"><div class="ph-title">${projectIcon(detail.project, 20)}<h1>${escapeHtml(detail.project.name)}</h1></div><div class="ph-actions">${chat}<button class="icon-btn" data-action="settings" title="Project settings">${icon("settings", 15)}</button></div></header>`
@@ -605,7 +601,7 @@ function render(): void {
     const element = root.querySelector(selector);
     if (element && scroll[index]) element.scrollTop = scroll[index];
   });
-  syncChatContext();
+  syncPageNote();
   const autofocus = root.querySelector<HTMLInputElement>("[autofocus]");
   if (autofocus && document.activeElement === document.body) autofocus.focus();
 }
@@ -701,6 +697,7 @@ async function saveFile(): Promise<void> {
 async function openCoordinator(slug: string): Promise<void> {
   const info = await host.call("ui_coordinator", { project: slug });
   if (info.threadId && (await host.openLink(`codex://threads/${info.threadId}`))) return;
+  if (info.newThreadUrl && (await host.openLink(info.newThreadUrl))) return;
   if (!(await host.message(info.kickoff, "new"))) toast("Could not open the chat. Type $coordinator in a new chat instead.", "error");
 }
 
@@ -715,6 +712,7 @@ async function onAction(target: HTMLElement): Promise<void> {
       return run(async () => {
         const data = await host.call("ui_state", { project: target.dataset.slug });
         state.snapshot = data.snapshot as Snapshot;
+        if (state.mode === "home" && target.dataset.slug) await openCoordinator(target.dataset.slug);
       });
     case "menu":
       state.menu = !state.menu;
@@ -809,12 +807,6 @@ async function onAction(target: HTMLElement): Promise<void> {
     }
     case "file-save":
       return saveFile();
-    case "chat-here":
-      if (!detail) return;
-      return run(async () => {
-        const info = await host.call("ui_coordinator", { project: detail.project.slug });
-        if (!(await host.message(info.kickoff, "active"))) toast("Could not send to the chat beside this page.", "error");
-      });
     case "open-coordinator":
       state.menu = false;
       if (!detail) return;
@@ -888,10 +880,8 @@ async function onSubmit(form: HTMLFormElement): Promise<void> {
       state.create = undefined;
       state.page = { kind: "project" };
       render();
-      const slug = result.saved as string;
       state.selected = true;
-      const info = await host.call("ui_coordinator", { project: slug });
-      if (!(await host.message(info.kickoff, "new"))) toast("Project created. Type $coordinator in a new chat to start it.", "error");
+      await openCoordinator(result.saved as string);
     } catch (error) {
       draft.saving = false;
       toast(error instanceof Error ? error.message : String(error), "error");
@@ -1098,8 +1088,8 @@ function connectMcpHost(): Host {
   app.addEventListener("hostcontextchanged", (context) => {
     applyContext({ ...app.getHostContext(), ...context });
     if ((context as Record<string, unknown>)["openai/modelContext"] === null) {
-      chatProject = undefined;
-      syncChatContext();
+      pageNoteSent = false;
+      syncPageNote();
     }
   });
   const connected = app.connect().then(() => {
@@ -1145,11 +1135,11 @@ function connectMcpHost(): Host {
         return false;
       }
     },
-    async chatContext(text, title) {
+    async pageNote(text) {
       await connected;
       if (!app.getHostCapabilities()?.updateModelContext) return false;
       try {
-        await app.updateModelContext({ content: text ? [{ type: "text", text, _meta: { "openai/title": title } }] : [] });
+        await app.updateModelContext({ content: [{ type: "text", text, annotations: { audience: ["assistant"] } }] });
         return true;
       } catch {
         return false;
@@ -1180,7 +1170,7 @@ function connectPreviewHost(): Host {
     return Promise.resolve(true);
   };
   void call(state.mode === "home" ? "coordinator_home" : "project_panel").then(handleContent);
-  return { call, openLink: (url) => note("open", url), message: (text, target) => note(`message (${target})`, text), openFile: async () => false, chatContext: async () => false, fullscreen: async () => false };
+  return { call, openLink: (url) => note("open", url), message: (text, target) => note(`message (${target})`, text), openFile: async () => false, pageNote: async () => false, fullscreen: async () => false };
 }
 
 host = window.parent !== window ? connectMcpHost() : connectPreviewHost();

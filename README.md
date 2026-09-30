@@ -6,9 +6,10 @@ The prompts and code are original. See [docs/design.md](docs/design.md) for how 
 
 ## What you get
 
-- **Create Project.** Pick an icon, a name, a workspace, and a model. Project Coordinator starts the project's coordinator chat for you.
-- **A Project Coordinator page in the Codex sidebar.** A project list like Code Review, each project's notes, agents, memory, and files, and the page's own chat as the coordinator. The page attaches the selected project to that chat, so what you type there goes to that project's coordinator. Coordinator chats are named after their project.
-- **A Project panel beside the chat.** Notes, agents grouped by *Needs you*, *Ready for review*, *Working*, and *Idle*, memory, and all files, in one scrolling panel.
+- **Create Project.** Pick an icon, a name, a workspace, and a model. Project Coordinator opens the project's coordinator chat in that workspace with the kickoff message ready to send.
+- **A Project Coordinator page in the Codex sidebar.** A project list like Code Review with each project's notes, agents, memory, and files. Click a project to open its coordinator chat.
+- **One coordinator chat per project.** It lives in the project's repository folder in the Codex sidebar and is named "Project Coordinator: <name>". It keeps one long thread that compacts but is never replaced, so the coordinator builds up context. A coordinator chat started elsewhere moves into the repository folder the next time you open it from the page.
+- **A Project panel beside the chat.** Open it once per coordinator chat from the side panel: **More tools… → Project**. Notes, agents grouped by *Needs you*, *Ready for review*, *Working*, and *Idle*, memory, and all files, in one scrolling panel.
 - **Project files in Codex tabs.** All Files lists the project's plans, docs, notes, and memory. A file opens in a Codex file tab, where you can read and edit it and save with ⌘S. The coordinator writes plans and documents with `file_write` and links them in chat and in `notes.md`.
 - **A coordinator skill (`$coordinator`).** The coordinator reads a project digest each turn, starts agents, forwards follow-ups, and keeps `notes.md` and memory current.
 - **Codex agents.** Agents run through `codex app-server` and show up as Codex chats. Each one gets a brief with the project instructions, memory, and its task, and ends each turn with a report: `## Report`, `## Next`, `## Needs you`, and `## Remember`.
