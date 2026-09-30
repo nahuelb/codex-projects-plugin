@@ -178,6 +178,7 @@ export interface Snapshot {
   projects: ProjectSummary[];
   current?: ProjectDetail;
   threadId?: string;
+  threadProject?: string;
 }
 
 export interface TranscriptItem {

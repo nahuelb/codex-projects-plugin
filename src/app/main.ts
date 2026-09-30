@@ -15,8 +15,9 @@ interface Host {
   fullscreen(): Promise<boolean>;
 }
 
-interface CreateDraft {
-  name: string;
+type DropdownKey = "workspace" | "model" | "effort";
+
+interface Draft {
   icon: ProjectIcon;
   color: ProjectColor;
   workspace: string;
@@ -24,6 +25,10 @@ interface CreateDraft {
   model: string;
   effort: string;
   picker: boolean;
+}
+
+interface CreateDraft extends Draft {
+  name: string;
   saving: boolean;
 }
 
@@ -33,9 +38,13 @@ interface State {
   threadId?: string;
   page: Page;
   create?: CreateDraft;
+  settings?: Draft;
+  dropdown?: DropdownKey;
   options?: { models: ModelOption[]; workspaces: string[] };
   transcript?: { agentId: string; items: TranscriptItem[] };
   menu: boolean;
+  filter: string;
+  selected: boolean;
   expandedDirs: Set<string>;
   collapsed: Set<string>;
   steer: boolean;
@@ -49,6 +58,8 @@ const state: State = {
   mode: "panel",
   page: { kind: "project" },
   menu: false,
+  filter: "",
+  selected: false,
   expandedDirs: new Set(["project:memory"]),
   collapsed: new Set(["files", "resolved"]),
   steer: false,
@@ -113,6 +124,7 @@ function apply(snapshot: Snapshot | undefined): void {
   if (!snapshot) return;
   state.snapshot = snapshot;
   if (snapshot.threadId) state.threadId = snapshot.threadId;
+  if (snapshot.threadProject && !state.selected) state.selected = true;
   const focused = document.activeElement;
   if (focused && ["INPUT", "TEXTAREA", "SELECT"].includes(focused.tagName) && root.contains(focused)) return;
   render();
@@ -165,16 +177,23 @@ function sectionHead(key: string, label: string, count?: number, extra = ""): st
   return `<button class="section-head" data-action="toggle-section" data-key="${key}">${icon(collapsed ? "chevronRight" : "chevronDown", 12, "chev")}<span>${label}</span>${count != null ? `<span class="count">${count}</span>` : ""}${extra}</button>`;
 }
 
+function withAgentLinks(html: string, detail: ProjectDetail): string {
+  return html.replace(/\(?\b(a-\d{3})\b\)?/g, (match, id: string) => {
+    const agent = detail.agents.find((item) => item.id === id);
+    return agent ? `<a class="agent-link" data-agent="${id}">${icon("agent", 13)}<strong>${escapeHtml(agent.title)}</strong></a>` : match;
+  });
+}
+
 function notesBlock(detail: ProjectDetail): string {
   const { tldr, sections } = detail.notes;
   const hasItems = sections.some((section) => section.items.length);
   if (!tldr.length && !hasItems) return "";
-  const tl = tldr.length ? `<div class="tldr">${tldr.map((line) => `<div class="tldr-line"><span>${inline(line)}</span></div>`).join("")}</div>` : "";
+  const tl = tldr.length ? `<div class="tldr">${tldr.map((line) => `<div class="tldr-line"><span>${withAgentLinks(inline(line), detail)}</span></div>`).join("")}</div>` : "";
   const body = sections
     .filter((section) => section.items.length || section.title)
     .map(
       (section) => `<div class="notes-section">${section.title ? `<div class="notes-title">${inline(section.title)}</div>` : ""}${section.items
-        .map((item) => `<div class="note ${item.checked ? "done" : ""}">${item.checked ? icon("checkCircle", 15, "note-icon") : icon("circle", 15, "note-icon")}<span>${inline(item.text)}</span></div>`)
+        .map((item) => `<div class="note ${item.checked ? "done" : ""}">${item.checked ? icon("checkCircle", 15, "note-icon") : icon("circle", 15, "note-icon")}<span>${withAgentLinks(inline(item.text), detail)}</span></div>`)
         .join("")}</div>`,
     )
     .join("");
@@ -294,20 +313,20 @@ function filePage(page: Extract<Page, { kind: "file" }>): string {
 }
 
 function settingsPage(detail: ProjectDetail): string {
-  const project = detail.project;
+  const draft = state.settings!;
   return `${subHeader("Project settings")}
   <form class="form" data-form="settings">
     <div class="identity">
-      <button type="button" class="icon-tile c-${project.color}" data-action="toggle-picker" data-target="settings">${icon(project.icon, 26)}</button>
-      <input class="title-input" name="name" value="${escapeHtml(project.name)}" placeholder="New Project">
+      <button type="button" class="icon-tile c-${draft.color}" data-action="toggle-picker" title="Choose an icon">${icon(draft.icon, 26)}</button>
+      <input class="title-input" name="name" value="${escapeHtml(detail.project.name)}" placeholder="New Project">
     </div>
-    ${state.create?.picker && !state.create.saving && state.page.kind === "settings" ? iconPicker(project.icon, project.color) : `<input type="hidden" name="icon" value="${project.icon}"><input type="hidden" name="color" value="${project.color}">`}
+    ${draft.picker ? iconPicker(draft) : ""}
     <div class="field-rows">
-      ${fieldRow("Workspace", workspaceSelect(project.repos[0] ?? "", "workspace"))}
-      ${fieldRow("Model", modelSelects(project.model ?? "", project.effort ?? ""))}
+      ${workspaceField(draft)}
+      ${fieldRow("Model", modelField(draft))}
     </div>
     <label class="field"><span>Instructions</span><textarea name="instructions" rows="8" maxlength="16000" placeholder="What every agent should know: conventions, which folder is which, rules no task can break.">${escapeHtml(detail.instructions.trim())}</textarea><span class="hint">Sent to every agent, like an AGENTS.md for the whole project.</span></label>
-    <label class="check"><input type="checkbox" name="prFollowUp" ${project.prFollowUp !== false ? "checked" : ""}><span><strong>Follow up on pull requests</strong><em>Send failing checks and requested changes back to the agent that opened the PR.</em></span></label>
+    <label class="check"><input type="checkbox" name="prFollowUp" ${detail.project.prFollowUp !== false ? "checked" : ""}><span><strong>Follow up on pull requests</strong><em>Send failing checks and requested changes back to the agent that opened the PR.</em></span></label>
     <div class="form-actions"><button class="btn primary" type="submit">Save</button><button class="btn ghost" type="button" data-action="archive">${icon("archive", 13)}Archive project</button></div>
   </form>`;
 }
@@ -316,36 +335,63 @@ function fieldRow(label: string, control: string): string {
   return `<div class="field-row"><span class="field-label">${label}</span><div class="field-control">${control}</div></div>`;
 }
 
-function workspaceSelect(selected: string, name: string): string {
-  const workspaces = state.options?.workspaces ?? [];
-  const list = selected && !workspaces.includes(selected) ? [selected, ...workspaces] : workspaces;
-  const loading = !state.options;
-  const other = state.create?.workspace === "__other" && state.page.kind !== "settings";
-  const options = [
-    `<option value="" ${!selected ? "selected" : ""}>${loading ? "Loading repositories…" : "No repository"}</option>`,
-    ...list.map((dir) => `<option value="${escapeHtml(dir)}" ${dir === selected ? "selected" : ""} title="${escapeHtml(dir)}">${escapeHtml(base(dir))}</option>`),
-    `<option value="__other" ${other ? "selected" : ""}>Other folder…</option>`,
-  ];
-  return `<select class="inline-select" name="${name}" data-bind="${name}">${options.join("")}</select>`;
+interface Choice {
+  value: string;
+  label: string;
+  sub?: string;
 }
 
-function modelSelects(model: string, effort: string): string {
+function dropdown(key: DropdownKey, placeholder: string, choices: Choice[], selected: string, strong = false): string {
+  const open = state.dropdown === key;
+  const current = choices.find((choice) => choice.value === selected)?.label ?? placeholder;
+  const menu = open
+    ? `<div class="dd-menu">${choices
+        .map(
+          (choice) => `<button type="button" class="dd-item ${choice.value === selected ? "on" : ""}" data-action="pick" data-key="${key}" data-value="${escapeHtml(choice.value)}"><span class="dd-text"><span class="dd-label">${escapeHtml(choice.label)}</span>${choice.sub ? `<span class="dd-sub">${escapeHtml(choice.sub)}</span>` : ""}</span>${choice.value === selected ? icon("check", 14, "dd-check") : ""}</button>`,
+        )
+        .join("")}</div>`
+    : "";
+  return `<div class="dd ${open ? "open" : ""}"><button type="button" class="dd-btn ${strong ? "strong" : ""}" data-action="dropdown" data-key="${key}">${escapeHtml(current)}${icon("chevronDown", 12, "chev")}</button>${menu}</div>`;
+}
+
+function homeDir(): string {
+  const root = state.snapshot?.root ?? "";
+  return root.replace(/\/[^/]+\/?$/, "");
+}
+
+function tilde(dir: string): string {
+  const home = homeDir();
+  return home && dir.startsWith(home + "/") ? `~${dir.slice(home.length)}` : dir;
+}
+
+function workspaceField(draft: Draft): string {
+  const workspaces = state.options?.workspaces ?? [];
+  const chosen = draft.workspace !== "__other" ? draft.workspace : "";
+  const list = chosen && !workspaces.includes(chosen) ? [chosen, ...workspaces] : workspaces;
+  const choices: Choice[] = [...list.map((dir) => ({ value: dir, label: base(dir), sub: tilde(dir) })), { value: "__other", label: "Other folder…" }, { value: "", label: "No repository" }];
+  const row = fieldRow("Workspace", dropdown("workspace", state.options ? "No repository" : "Loading repositories…", choices, draft.workspace));
+  const other = draft.workspace === "__other" ? `<div class="field-row"><input class="path-input" data-bind="otherPath" value="${escapeHtml(draft.otherPath)}" placeholder="/Users/you/code/api" autocomplete="off"></div>` : "";
+  return row + other;
+}
+
+function modelField(draft: Draft): string {
   const models = state.options?.models ?? [];
-  const chosen = models.find((option) => option.id === model) ?? models.find((option) => option.isDefault);
+  const fallback = models.find((option) => option.isDefault);
+  const chosen = models.find((option) => option.id === draft.model) ?? fallback;
   const efforts = chosen?.efforts.length ? chosen.efforts : ["low", "medium", "high"];
-  const modelOptions = [`<option value="" ${!model ? "selected" : ""}>${chosen && !model ? `${escapeHtml(chosen.label)} (default)` : "Default"}</option>`, ...models.map((option) => `<option value="${escapeHtml(option.id)}" ${option.id === model ? "selected" : ""}>${escapeHtml(option.label)}</option>`)];
-  const effortOptions = [`<option value="" ${!effort ? "selected" : ""}>${chosen ? capital(chosen.defaultEffort) : "Default"}</option>`, ...efforts.map((value) => `<option value="${value}" ${value === effort ? "selected" : ""}>${capital(value)}</option>`)];
-  return `<select class="inline-select strong" name="model" data-bind="model">${modelOptions.join("")}</select><select class="inline-select" name="effort" data-bind="effort">${effortOptions.join("")}</select>`;
+  const modelChoices: Choice[] = [{ value: "", label: fallback ? `${fallback.label}` : "Default", sub: "Codex default" }, ...models.filter((option) => option !== fallback).map((option) => ({ value: option.id, label: option.label }))];
+  const effortChoices: Choice[] = [{ value: "", label: chosen ? capital(chosen.defaultEffort) : "Default", sub: "Model default" }, ...efforts.map((value) => ({ value, label: capital(value) }))];
+  return `${dropdown("model", state.options ? "Default" : "Loading…", modelChoices, draft.model, true)}${dropdown("effort", "Default", effortChoices, draft.effort)}`;
 }
 
 function capital(text: string): string {
   return text ? text[0].toUpperCase() + text.slice(1) : text;
 }
 
-function iconPicker(selectedIcon: string, selectedColor: string): string {
+function iconPicker(draft: Draft): string {
   return `<div class="icon-picker">
-    <div class="picker-grid">${PROJECT_ICONS.map((name) => `<label class="pick ${selectedIcon === name ? "on" : ""}"><input type="radio" name="icon" value="${name}" ${selectedIcon === name ? "checked" : ""}>${icon(name, 17)}</label>`).join("")}</div>
-    <div class="picker-colors">${PROJECT_COLORS.map((color) => `<label class="swatch c-${color} ${selectedColor === color ? "on" : ""}"><input type="radio" name="color" value="${color}" ${selectedColor === color ? "checked" : ""}></label>`).join("")}</div>
+    <div class="picker-grid">${PROJECT_ICONS.map((name) => `<button type="button" class="pick ${draft.icon === name ? "on" : ""}" data-action="pick-icon" data-value="${name}">${icon(name, 17)}</button>`).join("")}</div>
+    <div class="picker-colors">${PROJECT_COLORS.map((color) => `<button type="button" class="swatch c-${color} ${draft.color === color ? "on" : ""}" data-action="pick-color" data-value="${color}" title="${color}"></button>`).join("")}</div>
   </div>`;
 }
 
@@ -355,13 +401,12 @@ function createDialog(): string {
   <form class="modal" data-form="create" role="dialog" aria-label="Create Project">
     <div class="modal-head"><div><h2>Create Project</h2><p>Create a focused chat where agents coordinate work</p></div><button type="button" class="icon-btn" data-action="close-create" title="Close">${icon("x", 15)}</button></div>
     <div class="modal-body">
-      <button type="button" class="icon-tile big c-${draft.color}" data-action="toggle-picker" data-target="create" title="Choose an icon">${icon(draft.icon, 30)}</button>
-      ${draft.picker ? iconPicker(draft.icon, draft.color) : ""}
-      <input class="title-input center" name="name" data-bind="name" value="${escapeHtml(draft.name)}" placeholder="New Project" autocomplete="off" autofocus>
+      <button type="button" class="icon-bare c-${draft.color}" data-action="toggle-picker" title="Choose an icon">${icon(draft.icon, 32)}</button>
+      ${draft.picker ? iconPicker(draft) : ""}
+      <input class="title-input center" data-bind="name" value="${escapeHtml(draft.name)}" placeholder="New Project" autocomplete="off" autofocus>
       <div class="field-rows">
-        ${fieldRow("Workspace", workspaceSelect(draft.workspace === "__other" ? "" : draft.workspace, "workspace"))}
-        ${draft.workspace === "__other" ? `<div class="field-row"><input class="path-input" name="otherPath" data-bind="otherPath" value="${escapeHtml(draft.otherPath)}" placeholder="/Users/you/code/api"></div>` : ""}
-        ${fieldRow("Model", modelSelects(draft.model, draft.effort))}
+        ${workspaceField(draft)}
+        ${fieldRow("Model", modelField(draft))}
       </div>
     </div>
     <div class="modal-foot"><button class="btn accent" type="submit" ${draft.saving ? "disabled" : ""}>${draft.saving ? `<span class="spinner light"></span>Creating…` : "Create Project"}</button></div>
@@ -405,33 +450,68 @@ function panelView(): string {
   return `<div class="panel">${head}<div class="panel-body">${body}</div></div>`;
 }
 
-function homeView(): string {
-  const snapshot = state.snapshot!;
-  const rows = snapshot.projects
-    .map((project) => {
-      const badges = [
-        project.needsYou ? `<span class="badge-soft warning">${project.needsYou} need${project.needsYou === 1 ? "s" : ""} you</span>` : "",
-        project.review ? `<span class="badge-soft success">${project.review} to review</span>` : "",
-        project.working ? `<span class="badge-soft info"><span class="spinner tiny"></span>${project.working} working</span>` : "",
-      ].join("");
-      return `<div class="project-row">
-        <button class="project-main" data-action="open-project" data-slug="${project.slug}">${projectIcon(project, 18)}<span class="row-main"><span class="row-title">${escapeHtml(project.name)}</span><span class="row-sub">${project.workspace ? escapeHtml(base(project.workspace)) : "No repository"}</span></span><span class="badges">${badges}</span><span class="age">${ago(project.updatedAt)}</span></button>
-        <button class="icon-btn row-menu" data-action="project-settings" data-slug="${project.slug}" title="Project settings">${icon("settings", 14)}</button>
-      </div>`;
-    })
-    .join("");
-  const list = snapshot.projects.length
-    ? `<div class="project-list">${rows}</div>`
-    : `<div class="empty"><div class="empty-icon">${icon("layers", 17)}</div><div class="empty-title">No projects yet</div><div class="empty-sub">A project is a focused chat where agents coordinate work. It keeps notes and memory that every agent reads.</div><button class="btn primary" data-action="new-project">${icon("plus", 14)}New Project</button></div>`;
-  const detail = current();
-  const settings = state.page.kind === "settings" && detail ? `<div class="modal-scrim" data-action="back"></div><div class="sheet">${settingsPage(detail)}</div>` : "";
-  return `<div class="home"><div class="home-inner">
-    <div class="home-head"><div><h1>Projects</h1><p class="muted">Each project is a coordinator chat that runs agents for you. Open one to continue.</p></div>${snapshot.projects.length ? `<button class="btn primary" data-action="new-project">${icon("plus", 14)}New Project</button>` : ""}</div>
-    ${list}
-  </div>${settings}</div>`;
+function projectMeta(project: ProjectSummary): string {
+  const parts: string[] = [];
+  if (project.needsYou) parts.push(`${project.needsYou} need${project.needsYou === 1 ? "s" : ""} you`);
+  if (project.working) parts.push(`${project.working} working`);
+  if (project.review) parts.push(`${project.review} to review`);
+  if (!parts.length) parts.push(project.workspace ? base(project.workspace) : "No repository");
+  parts.push(ago(project.updatedAt));
+  return parts.join(" · ");
 }
 
-const SCROLLERS = [".panel-body", ".home", ".sheet", ".transcript", ".modal-body"];
+function projectRow(project: ProjectSummary, active: boolean): string {
+  return `<button class="prow ${active ? "on" : ""}" data-action="select" data-slug="${project.slug}">
+    <span class="prow-title">${escapeHtml(project.name)}</span>
+    <span class="prow-meta">${projectIcon(project, 14)}<span>${escapeHtml(projectMeta(project))}</span></span>
+  </button>`;
+}
+
+function homeView(): string {
+  const snapshot = state.snapshot!;
+  const detail = current();
+  const needle = state.filter.trim().toLowerCase();
+  const projects = snapshot.projects.filter((project) => !needle || project.name.toLowerCase().includes(needle));
+  const groups: [string, ProjectSummary[]][] = [
+    ["Needs you", projects.filter((project) => project.needsYou > 0)],
+    ["In progress", projects.filter((project) => !project.needsYou && (project.working > 0 || project.review > 0))],
+    ["Recent", projects.filter((project) => !project.needsYou && !project.working && !project.review)],
+  ];
+  const sections = groups
+    .filter(([, members]) => members.length)
+    .map(([label, members]) => `<div class="plabel">${label}</div>${members.map((project) => projectRow(project, project.slug === detail?.project.slug && state.selected)).join("")}`)
+    .join("");
+  const list = `<aside class="plist">
+    <div class="plist-top"><label class="search-pill">${icon("search", 15)}<input data-bind="filter" value="${escapeHtml(state.filter)}" placeholder="Search projects" autocomplete="off"></label><button class="icon-btn" data-action="new-project" title="New Project">${icon("plus", 16)}</button></div>
+    <div class="plist-rows">${sections || `<div class="plabel">${snapshot.projects.length ? "No matches" : "No projects yet"}</div>`}</div>
+  </aside>`;
+  let main: string;
+  if (!snapshot.projects.length) {
+    main = `<div class="empty center"><div class="empty-glyph">${icon("layers", 30)}</div><div class="empty-title">Create your first project</div><div class="empty-sub">A focused chat where agents coordinate work</div><button class="btn primary" data-action="new-project">${icon("plus", 14)}New Project</button></div>`;
+  } else if (!detail || !state.selected) {
+    main = `<div class="empty center"><div class="empty-glyph">${icon("layers", 30)}</div><div class="empty-title">Select a project</div><div class="empty-sub">Choose one from the sidebar to see its agents, notes, and memory</div></div>`;
+  } else {
+    const page = state.page;
+    let body = "";
+    if (page.kind === "agent") {
+      const agent = agentById(page.id);
+      body = agent ? agentPage(agent) : projectPage(detail);
+    } else if (page.kind === "file") body = filePage(page);
+    else if (page.kind === "settings" && state.settings) body = settingsPage(detail);
+    else body = projectPage(detail);
+    const chat = detail.project.coordinatorThreadId
+      ? `<button class="btn small" data-action="open-coordinator">${icon("chat", 13)}Open chat</button>`
+      : `<button class="btn small primary" data-action="chat-here">${icon("chat", 13)}Start coordinator</button>`;
+    const head =
+      page.kind === "project"
+        ? `<header class="pdetail-head"><div class="ph-title">${projectIcon(detail.project, 20)}<h1>${escapeHtml(detail.project.name)}</h1></div><div class="ph-actions">${chat}<button class="icon-btn" data-action="settings" title="Project settings">${icon("settings", 15)}</button></div></header>`
+        : "";
+    main = `${head}<div class="pdetail-body">${body}</div>`;
+  }
+  return `<div class="home">${list}<main class="pdetail">${main}</main></div>`;
+}
+
+const SCROLLERS = [".panel-body", ".pdetail-body", ".plist-rows", ".transcript"];
 
 function render(): void {
   if (!state.snapshot) {
@@ -472,7 +552,21 @@ async function loadOptions(): Promise<void> {
 function openCreate(): void {
   const pick = PROJECT_ICONS[Math.floor(Math.random() * PROJECT_ICONS.length)];
   state.create = { name: "", icon: pick, color: "gray", workspace: "", otherPath: "", model: "", effort: "", picker: false, saving: false };
+  state.dropdown = undefined;
   state.menu = false;
+  render();
+  void loadOptions();
+}
+
+function activeDraft(): Draft | undefined {
+  return state.create ?? (state.page.kind === "settings" ? state.settings : undefined);
+}
+
+function openSettings(detail: ProjectDetail): void {
+  const project = detail.project;
+  state.settings = { icon: project.icon, color: project.color, workspace: project.repos[0] ?? "", otherPath: "", model: project.model ?? "", effort: project.effort ?? "", picker: false };
+  state.page = { kind: "settings" };
+  state.dropdown = undefined;
   render();
   void loadOptions();
 }
@@ -489,6 +583,7 @@ async function onAction(target: HTMLElement): Promise<void> {
   switch (action) {
     case "select":
       state.menu = false;
+      state.selected = true;
       state.page = { kind: "project" };
       return run(async () => {
         const data = await host.call("ui_state", { project: target.dataset.slug });
@@ -501,32 +596,56 @@ async function onAction(target: HTMLElement): Promise<void> {
       return openCreate();
     case "close-create":
       state.create = undefined;
+      state.dropdown = undefined;
       return render();
-    case "toggle-picker":
-      if (target.dataset.target === "settings") {
-        state.create = state.create ?? { name: "", icon: detail!.project.icon, color: detail!.project.color, workspace: "", otherPath: "", model: "", effort: "", picker: false, saving: false };
-        state.create.picker = !state.create.picker;
-        if (!state.create.picker) state.create = undefined;
-        return render();
-      }
-      if (state.create) state.create.picker = !state.create.picker;
+    case "toggle-picker": {
+      const draft = activeDraft();
+      if (draft) draft.picker = !draft.picker;
+      state.dropdown = undefined;
       return render();
+    }
+    case "pick-icon":
+    case "pick-color": {
+      const draft = activeDraft();
+      if (!draft) return;
+      if (action === "pick-icon") {
+        draft.icon = target.dataset.value as ProjectIcon;
+        draft.picker = false;
+      } else draft.color = target.dataset.value as ProjectColor;
+      return render();
+    }
+    case "dropdown": {
+      const key = target.dataset.key as DropdownKey;
+      state.dropdown = state.dropdown === key ? undefined : key;
+      return render();
+    }
+    case "pick": {
+      const draft = activeDraft();
+      const key = target.dataset.key as DropdownKey;
+      if (!draft) return;
+      draft[key] = target.dataset.value ?? "";
+      if (key === "model") draft.effort = "";
+      state.dropdown = undefined;
+      render();
+      if (key === "workspace" && draft.workspace === "__other") root.querySelector<HTMLInputElement>(".path-input")?.focus();
+      return;
+    }
     case "settings":
       state.menu = false;
-      state.page = { kind: "settings" };
-      render();
-      return loadOptions();
+      if (!detail) return;
+      openSettings(detail);
+      return;
     case "project-settings":
       return run(async () => {
         const data = await host.call("ui_state", { project: target.dataset.slug });
         state.snapshot = data.snapshot as Snapshot;
-        state.page = { kind: "settings" };
-        void loadOptions();
+        if (state.snapshot.current) openSettings(state.snapshot.current);
       });
     case "back":
       state.page = { kind: "project" };
       state.transcript = undefined;
-      if (state.create && !state.create.name && state.create.picker) state.create = undefined;
+      state.settings = undefined;
+      state.dropdown = undefined;
       return render();
     case "toggle-section": {
       const key = target.dataset.key!;
@@ -554,8 +673,12 @@ async function onAction(target: HTMLElement): Promise<void> {
         state.page = { kind: "file", scope, path, text: result.file.text };
       });
     }
-    case "open-project":
-      return run(() => openCoordinator(target.dataset.slug!));
+    case "chat-here":
+      if (!detail) return;
+      return run(async () => {
+        const info = await host.call("ui_coordinator", { project: detail.project.slug });
+        if (!(await host.message(info.kickoff, "active"))) toast("Could not send to the chat beside this page.", "error");
+      });
     case "open-coordinator":
       state.menu = false;
       if (!detail) return;
@@ -619,8 +742,8 @@ async function onSubmit(form: HTMLFormElement): Promise<void> {
     try {
       const result = await host.call("ui_project_save", {
         name: draft.name.trim() || "New Project",
-        icon: data.icon ?? draft.icon,
-        color: data.color ?? draft.color,
+        icon: draft.icon,
+        color: draft.color,
         repos: workspace ? [workspace] : [],
         model: draft.model,
         effort: draft.effort,
@@ -630,6 +753,7 @@ async function onSubmit(form: HTMLFormElement): Promise<void> {
       state.page = { kind: "project" };
       render();
       const slug = result.saved as string;
+      state.selected = true;
       const info = await host.call("ui_coordinator", { project: slug });
       if (!(await host.message(info.kickoff, "new"))) toast("Project created. Type $projects in a new chat to start it.", "error");
     } catch (error) {
@@ -638,22 +762,23 @@ async function onSubmit(form: HTMLFormElement): Promise<void> {
     }
     return;
   }
-  if (form.dataset.form === "settings" && detail) {
-    const workspace = data.workspace === "__other" ? (prompt("Absolute path of the repository") ?? "").trim() : data.workspace;
+  if (form.dataset.form === "settings" && detail && state.settings) {
+    const draft = state.settings;
+    const workspace = draft.workspace === "__other" ? draft.otherPath.trim() : draft.workspace;
     return run(async () => {
       const result = await host.call("ui_project_save", {
         project: detail.project.slug,
         name: data.name,
-        icon: data.icon,
-        color: data.color,
+        icon: draft.icon,
+        color: draft.color,
         repos: workspace ? [workspace] : [],
-        model: data.model,
-        effort: data.effort,
+        model: draft.model,
+        effort: draft.effort,
         instructions: data.instructions,
         prFollowUp: data.prFollowUp === "on",
       });
       state.snapshot = result.snapshot;
-      state.create = undefined;
+      state.settings = undefined;
       state.page = { kind: "project" };
     }, "Saved");
   }
@@ -673,6 +798,19 @@ root.addEventListener("click", (event) => {
   const element = event.target as HTMLElement;
   if (state.menu && !element.closest(".menu, [data-action='menu']")) {
     state.menu = false;
+    render();
+    return;
+  }
+  if (state.dropdown && !element.closest(".dd")) {
+    state.dropdown = undefined;
+    render();
+    if (!element.closest("[data-action]")) return;
+  }
+  const agentLink = element.closest<HTMLAnchorElement>("a[data-agent]");
+  if (agentLink) {
+    event.preventDefault();
+    state.page = { kind: "agent", id: agentLink.dataset.agent! };
+    state.transcript = undefined;
     render();
     return;
   }
@@ -702,32 +840,26 @@ root.addEventListener("submit", (event) => {
 root.addEventListener("input", (event) => {
   const field = event.target as HTMLInputElement;
   if (field.dataset.draft) state.drafts[field.dataset.draft] = field.value;
-  const bind = field.dataset.bind as keyof CreateDraft | undefined;
-  if (bind && state.create && field.closest("[data-form='create']") && (bind === "name" || bind === "otherPath")) state.create[bind] = field.value as never;
+  const bind = field.dataset.bind;
+  if (bind === "filter") {
+    state.filter = field.value;
+    const position = field.selectionStart;
+    render();
+    const input = root.querySelector<HTMLInputElement>("[data-bind='filter']");
+    input?.focus();
+    if (position != null) input?.setSelectionRange(position, position);
+    return;
+  }
+  if (bind === "name" && state.create) state.create.name = field.value;
+  if (bind === "otherPath") {
+    const draft = activeDraft();
+    if (draft) draft.otherPath = field.value;
+  }
 });
 
 root.addEventListener("change", (event) => {
   const input = event.target as HTMLInputElement;
   if (input.name === "steer") state.steer = input.checked;
-  const inCreate = Boolean(input.closest("[data-form='create']"));
-  if (inCreate && state.create) {
-    if (input.name === "icon" || input.name === "color") {
-      state.create[input.name] = input.value as never;
-      if (input.name === "icon") state.create.picker = false;
-      return render();
-    }
-    if (input.name === "workspace" || input.name === "model" || input.name === "effort") {
-      state.create[input.name] = input.value;
-      if (input.name === "model") state.create.effort = "";
-      return render();
-    }
-  }
-  if (input.type === "radio") {
-    input.closest(".picker-grid, .picker-colors")?.querySelectorAll("label").forEach((label) => label.classList.toggle("on", label.contains(input)));
-    const tile = input.closest("form")?.querySelector<HTMLElement>(".icon-tile");
-    if (tile && input.name === "color") tile.className = tile.className.replace(/c-\w+/, `c-${input.value}`);
-    if (tile && input.name === "icon") tile.innerHTML = icon(input.value, 26);
-  }
 });
 
 root.addEventListener("toggle", (event) => {
@@ -745,9 +877,13 @@ root.addEventListener("keydown", (event) => {
     target.closest("form")?.requestSubmit();
   }
   if (event.key === "Escape") {
-    if (state.create) state.create = undefined;
+    if (state.dropdown) state.dropdown = undefined;
+    else if (state.create) state.create = undefined;
     else if (state.menu) state.menu = false;
-    else if (state.page.kind !== "project") state.page = { kind: "project" };
+    else if (state.page.kind !== "project") {
+      state.page = { kind: "project" };
+      state.settings = undefined;
+    }
     render();
   }
 });
@@ -758,6 +894,8 @@ function applyContext(context: McpUiHostContext | undefined): void {
   if (context.styles?.variables) applyHostStyleVariables(context.styles.variables);
   if (context.styles?.css?.fonts) applyHostFonts(context.styles.css.fonts);
   document.body.classList.toggle("fullscreen", context.displayMode === "fullscreen");
+  const inset = context.safeAreaInsets?.right ?? 0;
+  document.documentElement.style.setProperty("--chat-inset", inset > 0 ? `${inset}px` : "");
 }
 
 function handleContent(content: Record<string, any>): void {
@@ -836,5 +974,5 @@ host = window.parent !== window ? connectMcpHost() : connectPreviewHost();
 render();
 
 setInterval(() => {
-  if (document.visibilityState === "visible" && state.snapshot && !state.pending && !state.create) void refresh().catch(() => undefined);
+  if (document.visibilityState === "visible" && state.snapshot && !state.pending && !state.create && !state.settings) void refresh().catch(() => undefined);
 }, 3000);

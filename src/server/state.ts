@@ -72,7 +72,8 @@ export async function snapshot(requested?: string, threadId?: string): Promise<S
   const projects = await listProjects();
   const summaries = await Promise.all(projects.map(projectSummary));
   summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  const preferred = requested || (await projectForThread(threadId)) || (await lastProject());
+  const threadProject = await projectForThread(threadId);
+  const preferred = requested || threadProject || (await lastProject());
   const slug = projects.find((project) => project.slug === preferred)?.slug ?? summaries[0]?.slug;
   const service = await daemonStatus();
   return {
@@ -83,5 +84,6 @@ export async function snapshot(requested?: string, threadId?: string): Promise<S
     projects: summaries,
     current: slug ? await projectDetail(slug) : undefined,
     threadId,
+    threadProject,
   };
 }

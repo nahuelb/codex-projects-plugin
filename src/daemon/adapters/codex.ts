@@ -362,25 +362,11 @@ export class CodexAdapter implements HarnessAdapter {
     return [...seen].slice(0, 20);
   }
 
-  async adoptThread(threadId: string, name: string, sectionName = "Projects"): Promise<{ renamed: boolean; moved: boolean }> {
+  async adoptThread(threadId: string, name: string): Promise<{ renamed: boolean }> {
     const read: Json = await this.call("thread/read", { threadId, includeTurns: false });
-    const thread = read.thread ?? {};
-    let renamed = false;
-    let moved = false;
-    if (thread.name !== name) {
-      await this.call("thread/name/set", { threadId, name });
-      renamed = true;
-    }
-    if (!thread.section) {
-      const sections: Json = await this.call("threadSection/list", { limit: 100 });
-      let section = (sections.data ?? []).find((item: Json) => item.name === sectionName);
-      if (!section) section = (await this.call("threadSection/create", { name: sectionName, appearance: null })).section ?? (await this.call("threadSection/list", { limit: 100 })).data?.find((item: Json) => item.name === sectionName);
-      if (section?.id) {
-        await this.call("thread/section/move", { threadId, sectionId: section.id });
-        moved = true;
-      }
-    }
-    return { renamed, moved };
+    if (read.thread?.name === name) return { renamed: false };
+    await this.call("thread/name/set", { threadId, name });
+    return { renamed: true };
   }
 
   async dispose(): Promise<void> {

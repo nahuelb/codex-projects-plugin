@@ -7,7 +7,7 @@ Inspired by Cursor Projects and Claude Code Projects. The prompts and code are o
 ## What you get
 
 - **Create Project.** Pick an icon, a name, a workspace, and a model. Projects starts the project's coordinator chat for you.
-- **Projects in the Codex sidebar.** Coordinator chats are named after their project and grouped in a **Projects** section. The **Projects** page lists every project with what needs you, and opens its chat.
+- **A Projects page in the Codex sidebar.** A project list like Code Review, each project's notes, agents, memory, and files, and the page's own chat as the coordinator. Coordinator chats are named after their project.
 - **A Project panel beside the chat.** Notes, agents grouped by *Needs you*, *Ready for review*, *Working*, and *Idle*, memory, and all files, in one scrolling panel.
 - **A coordinator skill (`$projects`).** The coordinator reads a project digest each turn, starts agents, forwards follow-ups, and keeps `notes.md` and memory current.
 - **Codex agents.** Agents run through `codex app-server` and show up as Codex chats. Each one gets a brief with the project instructions, memory, and its task, and ends each turn with a report: `## Report`, `## Next`, `## Needs you`, and `## Remember`.

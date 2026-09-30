@@ -16,6 +16,10 @@ await mkdir(target, { recursive: true });
 for (const entry of [".codex-plugin", ".mcp.json", "skills", "assets", "dist", "README.md", "LICENSE"]) {
   if (existsSync(entry)) await cp(entry, path.join(target, entry), { recursive: true });
 }
+const manifestFile = path.join(target, ".codex-plugin", "plugin.json");
+const manifest = JSON.parse(await readFile(manifestFile, "utf8"));
+manifest.version = `${manifest.version.split("+")[0]}+local.${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14)}`;
+await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
 await writeFile(path.join(target, "package.json"), `${JSON.stringify({ name, private: true, type: "module", engines: { node: ">=22" } }, null, 2)}\n`);
 
 const marketplace = existsSync(marketplaceFile)
@@ -31,5 +35,6 @@ marketplace.plugins.push({
 await mkdir(path.dirname(marketplaceFile), { recursive: true });
 await writeFile(marketplaceFile, `${JSON.stringify(marketplace, null, 2)}\n`);
 
+console.log(`Version ${manifest.version}.`);
 console.log(`Copied the plugin to ${target} and listed it in ${marketplaceFile}.`);
 console.log(`Next: codex plugin add ${name}@${marketplace.name ?? "personal"}   (then restart the Codex app)`);

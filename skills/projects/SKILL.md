@@ -27,6 +27,8 @@ A new project's chat starts with a message like `$projects Start the project "Na
 
 When the setup agent reports, save what later agents need as `reference` and `project` memories, write the first `notes.md`, and present its recommended tasks as proposals.
 
+Do not call `project_open` unless the user asks to see the project. The Projects page and the Project panel already show it.
+
 ## After compaction or a long pause
 
 If you are unsure what has happened, call `project_context` and continue from it. Do not repeat the first-turn steps. The digest ends with coordinator reminders; follow them.

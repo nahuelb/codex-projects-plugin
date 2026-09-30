@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { ResourceTemplate, type McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AgentRecord, Snapshot, TranscriptItem } from "../shared/types.ts";
@@ -23,7 +24,6 @@ import { callDaemon } from "../daemon/client.ts";
 import type { SendResult } from "../daemon/adapters/types.ts";
 import { bindThread, createOptions, projectForThread, rememberProject, snapshot } from "./state.ts";
 
-export const UI_URI = "ui://projects/app-v1";
 
 const ICON_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.33" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2.75 16.5 6.4 10 10.05 3.5 6.4Z"/><path d="m3.5 10.05 6.5 3.65 6.5-3.65"/><path d="m3.5 13.7 6.5 3.55 6.5-3.55"/></svg>';
@@ -97,6 +97,7 @@ function registerMentions(server: McpServer): void {
 }
 
 export function registerTools(server: McpServer, html: string): void {
+  const UI_URI = `ui://projects/app-${createHash("sha256").update(html).digest("hex").slice(0, 12)}`;
   registerMentions(server);
   server.registerResource("projects-app", UI_URI, { title: "Projects", mimeType: "text/html;profile=mcp-app" }, async () => ({
     contents: [
@@ -105,7 +106,7 @@ export function registerTools(server: McpServer, html: string): void {
         mimeType: "text/html;profile=mcp-app",
         text: html,
         _meta: {
-          "openai/ui": { preferredDisplayMode: "fullscreen", availableDisplayModes: ["inline", "fullscreen"] },
+          "openai/ui": { preferredDisplayMode: "inline", availableDisplayModes: ["inline", "fullscreen"] },
           ui: { prefersBorder: false, csp: { connectDomains: [], resourceDomains: [] } },
         },
       },
@@ -124,7 +125,9 @@ export function registerTools(server: McpServer, html: string): void {
       icons: [ICON],
       _meta: ui([{ type: "global", quickAction: { title: "New Project", icons: [PLUS_ICON], target: { type: "tool", name: "project_new", arguments: {} } } }]),
     } as any,
-    (async (_args: unknown, extra: any) => view(await snapshot(undefined, threadOf(extra)), { mode: "home" })) as any,
+    (async (_args: unknown, extra: any) => {
+      return view(await snapshot(undefined, threadOf(extra)), { mode: "home" });
+    }) as any,
   );
 
   server.registerTool(
@@ -156,7 +159,7 @@ export function registerTools(server: McpServer, html: string): void {
     "project_open",
     {
       title: "Show project",
-      description: "Show a project's live status view to the user: notes, agents grouped by what needs them, and files.",
+      description: "Show a project's status card in this conversation. Only when the user asks to see the project; the Projects page and the Project panel already show it.",
       inputSchema: z.object({ project: projectArg.optional() }),
       annotations: readOnly,
       _meta: { ui: { resourceUri: UI_URI } },
@@ -442,9 +445,9 @@ export function registerTools(server: McpServer, html: string): void {
   server.registerTool(
     "ui_state",
     { title: "Projects state", description: "App view state.", inputSchema: z.object({ project: z.string().optional(), threadId: z.string().optional() }), annotations: readOnly, _meta: appOnly },
-    async ({ project, threadId }) => {
+    async ({ project, threadId }, extra: any) => {
       if (project) await rememberProject(project);
-      return view(await snapshot(project, threadId));
+      return view(await snapshot(project, threadId ?? threadOf(extra)));
     },
   );
 
