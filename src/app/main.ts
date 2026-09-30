@@ -574,7 +574,7 @@ function openSettings(detail: ProjectDetail): void {
 async function openCoordinator(slug: string): Promise<void> {
   const info = await host.call("ui_coordinator", { project: slug });
   if (info.threadId && (await host.openLink(`codex://threads/${info.threadId}`))) return;
-  if (!(await host.message(info.kickoff, "new"))) toast("Could not open the chat. Type $projects in a new chat instead.", "error");
+  if (!(await host.message(info.kickoff, "new"))) toast("Could not open the chat. Type $coordinator in a new chat instead.", "error");
 }
 
 async function onAction(target: HTMLElement): Promise<void> {
@@ -755,7 +755,7 @@ async function onSubmit(form: HTMLFormElement): Promise<void> {
       const slug = result.saved as string;
       state.selected = true;
       const info = await host.call("ui_coordinator", { project: slug });
-      if (!(await host.message(info.kickoff, "new"))) toast("Project created. Type $projects in a new chat to start it.", "error");
+      if (!(await host.message(info.kickoff, "new"))) toast("Project created. Type $coordinator in a new chat to start it.", "error");
     } catch (error) {
       draft.saving = false;
       toast(error instanceof Error ? error.message : String(error), "error");
@@ -905,14 +905,14 @@ function handleContent(content: Record<string, any>): void {
 }
 
 function connectMcpHost(): Host {
-  const app = new App({ name: "projects", version: "0.2.0" }, {}, { autoResize: true });
+  const app = new App({ name: "coordinator", version: "0.2.0" }, {}, { autoResize: true });
   const extensions = new OpenAIExtensions(app);
   app.ontoolresult = (result) => handleContent((result.structuredContent ?? {}) as Record<string, any>);
   app.addEventListener("hostcontextchanged", (context) => applyContext({ ...app.getHostContext(), ...context }));
   const connected = app.connect().then(() => {
     const context = app.getHostContext();
     const tool = context?.toolInfo?.tool?.name;
-    if (tool === "projects_home" || tool === "project_new") state.mode = "home";
+    if (tool === "coordinator_home" || tool === "project_new") state.mode = "home";
     applyContext(context);
     if (!state.snapshot) void refresh().catch((error) => toast(String(error.message ?? error), "error"));
   });
@@ -966,7 +966,7 @@ function connectPreviewHost(): Host {
     toast(`${label}: ${text.slice(0, 120)}`);
     return Promise.resolve(true);
   };
-  void call(state.mode === "home" ? "projects_home" : "project_panel").then(handleContent);
+  void call(state.mode === "home" ? "coordinator_home" : "project_panel").then(handleContent);
   return { call, openLink: (url) => note("open", url), message: (text, target) => note(`message (${target})`, text), fullscreen: async () => false };
 }
 

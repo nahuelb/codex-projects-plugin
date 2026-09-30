@@ -1,7 +1,7 @@
 {
   "name": "codex-projects-plugin",
   "version": "0.1.0",
-  "description": "Cursor-style Projects for Codex: one coordinator chat per project, parallel Codex agents, durable memory, and a project panel inside Codex.",
+  "description": "Project Coordinator for Codex, inspired by Cursor Projects and Claude Code Projects: one coordinator chat per project, parallel Codex agents, durable memory, and a project panel inside Codex.",
   "author": {
     "name": "nahuelb",
     "url": "https://github.com/nahuelb"
@@ -14,7 +14,7 @@
     }
   },
   "interface": {
-    "displayName": "Projects",
+    "displayName": "Project Coordinator",
     "shortDescription": "Coordinate long-running work across parallel agents",
     "longDescription": "Talk to one coordinator per project. It delegates tasks to Codex agents in their own worktrees, tracks what needs you, and keeps project notes and memory that every agent reads.",
     "developerName": "nahuelb",
@@ -23,8 +23,8 @@
     "composerIcon": "./assets/icon.svg",
     "logo": "./assets/icon.svg",
     "logoDark": "./assets/icon-dark.svg",
-    "defaultPrompt": ["Use $projects to coordinate this project."]
+    "defaultPrompt": ["Use $coordinator to coordinate this project."]
   },
   "license": "MIT",
-  "keywords": ["projects", "coordination", "agents", "memory"]
+  "keywords": ["projects", "coordinator", "coordination", "agents", "memory"]
 }

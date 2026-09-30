@@ -9,9 +9,9 @@ widenPath();
 
 const html = await readFile(new URL("./app.html", import.meta.url), "utf8");
 
-const server = new McpServer({ name: "projects", title: "Projects", version: VERSION, icons: [ICON] } as any, {
+const server = new McpServer({ name: "coordinator", title: "Project Coordinator", version: VERSION, icons: [ICON] } as any, {
   instructions:
-    "Projects gives this conversation a coordinator role for long-running work. Use the $projects skill to coordinate a project. Call project_context at the start of each coordinator turn.",
+    "Project Coordinator gives this conversation a coordinator role for long-running work. Use the $coordinator skill to coordinate a project. Call project_context at the start of each coordinator turn.",
 });
 
 registerTools(server, html);

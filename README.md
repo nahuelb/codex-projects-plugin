@@ -1,15 +1,15 @@
-# codex-projects-plugin
+# Project Coordinator for Codex
 
-Cursor-style Projects inside the Codex app. Each project is a coordinator chat. It hands each task to a background Codex agent in its own git worktree, tracks what needs you, and keeps notes and memory that every agent reads.
+Project Coordinator is a Codex plugin inspired by Cursor Projects and Claude Code Projects. Each project gets a coordinator chat. It hands each task to a background Codex agent in its own git worktree, tracks what needs you, and keeps notes and memory that every agent reads.
 
-Inspired by Cursor Projects and Claude Code Projects. The prompts and code are original. See [docs/design.md](docs/design.md) for how each pattern maps here and what is not built yet.
+The prompts and code are original. See [docs/design.md](docs/design.md) for how each pattern maps here and what is not built yet.
 
 ## What you get
 
-- **Create Project.** Pick an icon, a name, a workspace, and a model. Projects starts the project's coordinator chat for you.
-- **A Projects page in the Codex sidebar.** A project list like Code Review, each project's notes, agents, memory, and files, and the page's own chat as the coordinator. Coordinator chats are named after their project.
+- **Create Project.** Pick an icon, a name, a workspace, and a model. Project Coordinator starts the project's coordinator chat for you.
+- **A Project Coordinator page in the Codex sidebar.** A project list like Code Review, each project's notes, agents, memory, and files, and the page's own chat as the coordinator. Coordinator chats are named after their project.
 - **A Project panel beside the chat.** Notes, agents grouped by *Needs you*, *Ready for review*, *Working*, and *Idle*, memory, and all files, in one scrolling panel.
-- **A coordinator skill (`$projects`).** The coordinator reads a project digest each turn, starts agents, forwards follow-ups, and keeps `notes.md` and memory current.
+- **A coordinator skill (`$coordinator`).** The coordinator reads a project digest each turn, starts agents, forwards follow-ups, and keeps `notes.md` and memory current.
 - **Codex agents.** Agents run through `codex app-server` and show up as Codex chats. Each one gets a brief with the project instructions, memory, and its task, and ends each turn with a report: `## Report`, `## Next`, `## Needs you`, and `## Remember`.
 - **@-mention a project** in any chat to attach its current status.
 - **Pull request follow-up.** When an agent's PR gets failing checks or a review that requests changes, the agent is told to fix it. When it merges, the coordinator hears about it.
@@ -25,7 +25,7 @@ npm run install:local
 codex plugin add codex-projects-plugin@personal
 ```
 
-Restart the Codex app, then open **Projects** in the sidebar and click **New Project**.
+Restart the Codex app, then open **Project Coordinator** in the sidebar and click **New Project**.
 
 `install:local` copies the built plugin to `~/plugins/codex-projects-plugin` and lists it in `~/.agents/plugins/marketplace.json`.
 
@@ -33,8 +33,8 @@ Restart the Codex app, then open **Projects** in the sidebar and click **New Pro
 
 ```
 Codex app ── MCP (stdio) ──► dist/server.js ── unix socket ──► dist/daemon.js (coordd)
-   │  Projects page + Project panel (MCP App UI)     │                 └─ codex app-server (agents, models,
-   │  coordinator chat with $projects skill          │                    thread names and sidebar section)
+   │  Coordinator page + Project panel (MCP App UI)  │                 └─ codex app-server (agents, models,
+   │  coordinator chat with $coordinator skill       │                    thread names)
    └─────────────────────────────────────────────────┴── ~/.projects-coordinator/ (files are the record)
 ```
 
@@ -65,7 +65,7 @@ Set `PROJECTS_COORDINATOR_HOME` to use another folder.
 - Codex agents run with the `workspace-write` sandbox, approval `never`, network on, and write access to their worktree and the repository's `.git` folder. Set `PROJECTS_CODEX_NETWORK=0` to turn network off.
 - PR follow-up needs `gh` signed in. It runs while the background service is up.
 - The plugin launches your own signed-in `codex` CLI. It never handles your credentials.
-- The Projects page, Project panel, quick action, mentions, and deep links use OpenAI's MCP extensions. Other MCP hosts show the plain MCP App, if they support MCP Apps.
+- The Project Coordinator page, Project panel, quick action, mentions, and deep links use OpenAI's MCP extensions. Other MCP hosts show the plain MCP App, if they support MCP Apps.
 - Mobile needs a hosted endpoint and is not built yet.
 
 ## Development

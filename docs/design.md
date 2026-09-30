@@ -1,14 +1,14 @@
 # Design notes
 
-How Projects brings the ideas of Cursor Projects and Claude Code Projects into the Codex app. The wording, prompts, and code here are original.
+How Project Coordinator brings the ideas of Cursor Projects and Claude Code Projects into the Codex app. The wording, prompts, and code here are original.
 
 ## Shared model
 
 | Pattern | Inspiration | Here |
 | --- | --- | --- |
-| One coordinator per project that plans and delegates but does no heavy work | Cursor, Claude | The project's coordinator is a normal Codex chat running the `$projects` skill |
+| One coordinator per project that plans and delegates but does no heavy work | Cursor, Claude | The project's coordinator is a normal Codex chat running the `$coordinator` skill |
 | Workers are full agent sessions in their own branch or worktree | Cursor, Claude | `agent_start` runs a Codex thread in a `project/<slug>/<id>-<title>` worktree |
-| A project list that is always visible | Cursor | The Projects page lists every project beside its details, and the page's own chat runs the coordinator |
+| A project list that is always visible | Cursor | The Project Coordinator page lists every project beside its details, and the page's own chat runs the coordinator |
 | A project panel beside the conversation | Cursor | The Project panel shows notes, agents, memory, and files for the chat it sits next to |
 | A status board the user reads instead of opening every worker | Cursor (`notes.md`), Claude (Overview) | `notes.md` written by the coordinator, plus agent groups derived from state |
 | Fixed agent states that drive an inbox | Claude | Needs you, Ready for review, Working, Idle, Resolved |
@@ -27,7 +27,7 @@ How Projects brings the ideas of Cursor Projects and Claude Code Projects into t
 
 - **Coordinator chats are Codex threads.** Create Project starts the coordinator in a new Codex chat. On its first tool call the plugin reads the thread id Codex sends, links the thread to the project and names it after the project.
 - **Workers are Codex threads.** Agents run through `codex app-server`, so each one appears in Codex and opens with **Open chat**.
-- **Plugin surfaces.** A Projects page in the sidebar with a New Project quick action, a Project panel beside any chat, and `@` mentions that attach a project's digest to a chat.
+- **Plugin surfaces.** A Project Coordinator page in the sidebar with a New Project quick action, a Project panel beside any chat, and `@` mentions that attach a project's digest to a chat.
 - **Local first.** Everything lives in `~/.projects-coordinator`. Agents run on this machine with the user's signed-in Codex CLI.
 
 ## Not built yet

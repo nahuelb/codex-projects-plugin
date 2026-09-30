@@ -172,7 +172,7 @@ export class AgentService {
         if (agent.status === "working" || agent.status === "starting") {
           agent.status = "stopped";
           agent.activity = undefined;
-          agent.error = "Interrupted because the Projects service restarted. Send a message to continue.";
+          agent.error = "Interrupted because the Project Coordinator service restarted. Send a message to continue.";
           await this.persist(agent);
           await addInbox(agent.slug, { kind: "agent_stopped", agentId: agent.id, title: agent.title, summary: agent.error });
           recovered += 1;

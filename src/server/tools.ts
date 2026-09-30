@@ -78,7 +78,7 @@ const threadOf = (extra: any): string | undefined => {
 };
 
 export const COORDINATOR_KICKOFF = (name: string, slug: string) =>
-  `$projects Start the project "${name}" (${slug}). You are its coordinator.`;
+  `$coordinator Start the project "${name}" (${slug}). You are its coordinator.`;
 
 function registerMentions(server: McpServer): void {
   createMentions(server).setHandler(async ({ query }: { query: string }) => {
@@ -97,9 +97,9 @@ function registerMentions(server: McpServer): void {
 }
 
 export function registerTools(server: McpServer, html: string): void {
-  const UI_URI = `ui://projects/app-${createHash("sha256").update(html).digest("hex").slice(0, 12)}`;
+  const UI_URI = `ui://coordinator/app-${createHash("sha256").update(html).digest("hex").slice(0, 12)}`;
   registerMentions(server);
-  server.registerResource("projects-app", UI_URI, { title: "Projects", mimeType: "text/html;profile=mcp-app" }, async () => ({
+  server.registerResource("coordinator-app", UI_URI, { title: "Project Coordinator", mimeType: "text/html;profile=mcp-app" }, async () => ({
     contents: [
       {
         uri: UI_URI,
@@ -116,10 +116,10 @@ export function registerTools(server: McpServer, html: string): void {
   const ui = (entrypoints: unknown[]) => ({ ui: { resourceUri: UI_URI }, "openai/ui": { entrypoints }, "openai/iconStyle": "monochrome" });
 
   server.registerTool(
-    "projects_home",
+    "coordinator_home",
     {
-      title: "Projects",
-      description: "Open the Projects home: every project, its agents, notes, and memory.",
+      title: "Project Coordinator",
+      description: "Open the Project Coordinator page: every project, its agents, notes, and memory.",
       inputSchema: z.object({}),
       annotations: readOnly,
       icons: [ICON],
@@ -159,7 +159,7 @@ export function registerTools(server: McpServer, html: string): void {
     "project_open",
     {
       title: "Show project",
-      description: "Show a project's status card in this conversation. Only when the user asks to see the project; the Projects page and the Project panel already show it.",
+      description: "Show a project's status card in this conversation. Only when the user asks to see the project; the Project Coordinator page and the Project panel already show it.",
       inputSchema: z.object({ project: projectArg.optional() }),
       annotations: readOnly,
       _meta: { ui: { resourceUri: UI_URI } },
@@ -444,7 +444,7 @@ export function registerTools(server: McpServer, html: string): void {
 
   server.registerTool(
     "ui_state",
-    { title: "Projects state", description: "App view state.", inputSchema: z.object({ project: z.string().optional(), threadId: z.string().optional() }), annotations: readOnly, _meta: appOnly },
+    { title: "Project Coordinator state", description: "App view state.", inputSchema: z.object({ project: z.string().optional(), threadId: z.string().optional() }), annotations: readOnly, _meta: appOnly },
     async ({ project, threadId }, extra: any) => {
       if (project) await rememberProject(project);
       return view(await snapshot(project, threadId ?? threadOf(extra)));

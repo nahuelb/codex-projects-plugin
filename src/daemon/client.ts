@@ -28,7 +28,7 @@ function post<T>(method: string, params: unknown, timeoutMs: number): Promise<T>
         }
       });
     });
-    request.on("timeout", () => request.destroy(new Error(`Projects service did not answer ${method} in time.`)));
+    request.on("timeout", () => request.destroy(new Error(`Project Coordinator service did not answer ${method} in time.`)));
     request.on("error", reject);
     request.end(JSON.stringify({ method, params }));
   });
@@ -70,7 +70,7 @@ export function ensureDaemon(): Promise<Health> {
       current = await health();
       if (current) return current;
     }
-    throw new Error(`The Projects service did not start. See ${paths.daemonLog()}.`);
+    throw new Error(`The Project Coordinator service did not start. See ${paths.daemonLog()}.`);
   })().finally(() => {
     starting = undefined;
   });

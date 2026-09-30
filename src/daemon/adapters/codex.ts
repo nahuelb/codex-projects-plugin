@@ -101,7 +101,7 @@ export class CodexAdapter implements HarnessAdapter {
       });
       child.on("exit", (code) => this.onExit(code));
       readline.createInterface({ input: child.stdout }).on("line", (line) => this.onLine(line));
-      this.request("initialize", { clientInfo: { name: "codex-projects-plugin", title: "Projects", version: this.version }, capabilities: null }, 30_000)
+      this.request("initialize", { clientInfo: { name: "codex-projects-plugin", title: "Project Coordinator", version: this.version }, capabilities: null }, 30_000)
         .then(() => {
           this.write({ jsonrpc: "2.0", method: "initialized" });
           resolve();
@@ -183,7 +183,7 @@ export class CodexAdapter implements HarnessAdapter {
         this.write({ jsonrpc: "2.0", id: message.id, result: { decision: "decline" } });
         return;
       default:
-        this.write({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: `Projects does not handle ${message.method}` } });
+        this.write({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: `Project Coordinator does not handle ${message.method}` } });
     }
   }
 

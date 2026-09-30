@@ -279,7 +279,7 @@ body:not(.fullscreen) .panel { min-height: 0; }
 .agent-link:hover { text-decoration: none; }
 .agent-link:hover strong { text-decoration-color: currentColor; }
 
-/* Projects page (sidebar entrypoint): list | project | Codex chat panel. Tokens match Codex Code Review. */
+/* Project Coordinator page (sidebar entrypoint): list | project | Codex chat panel. Tokens match Codex Code Review. */
 .home { display: grid; grid-template-columns: 238px minmax(0, 1fr); height: 100vh; padding-right: var(--chat-inset, clamp(380px, 44vw, 760px)); }
 .plist { display: flex; flex-direction: column; min-height: 0; background: light-dark(rgb(26 28 31 / 3%), rgb(255 255 255 / 3.5%)); }
 .plist-top { display: flex; align-items: center; gap: 4px; padding: 10px 8px 6px; }

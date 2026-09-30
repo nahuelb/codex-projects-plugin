@@ -2,7 +2,7 @@
   "name": "codex-projects-plugin",
   "version": "0.1.0",
   "private": true,
-  "description": "Cursor-style Projects for Codex: a coordinator, parallel agents on any harness, durable memory, and a project UI inside Codex.",
+  "description": "Project Coordinator for Codex, inspired by Cursor Projects and Claude Code Projects: a coordinator chat per project, parallel Codex agents, durable memory, and a project UI inside Codex.",
   "license": "MIT",
   "type": "module",
   "engines": {
