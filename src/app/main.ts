@@ -55,7 +55,6 @@ interface State {
   dropdown?: DropdownKey;
   options?: { models: ModelOption[]; workspaces: string[] };
   transcript?: { agentId: string; items: TranscriptItem[] };
-  menu: boolean;
   filter: string;
   selected: boolean;
   expandedDirs: Set<string>;
@@ -88,7 +87,6 @@ function storedListWidth(): number {
 const state: State = {
   mode: "panel",
   page: { kind: "project" },
-  menu: false,
   filter: "",
   selected: true,
   expandedDirs: new Set(["root:project", "root:user"]),
@@ -289,7 +287,7 @@ function treeRoot(scope: FileScope, label: string, nodes: FileNode[]): string {
 
 function filesBlock(detail: ProjectDetail): string {
   const collapsed = state.collapsed.has("files");
-  const tree = `<div class="tree">${treeRoot("project", "Project", detail.files.project)}${treeRoot("user", "User", detail.files.user)}</div>`;
+  const tree = `<div class="tree">${treeRoot("project", "Coordinator", detail.files.project)}${treeRoot("user", "User", detail.files.user)}</div>`;
   return `<section class="block">${sectionHead("files", "All Files")}${collapsed ? "" : tree}</section>`;
 }
 
@@ -357,7 +355,7 @@ function agentPage(agent: AgentView): string {
 function fileCrumbs(page: FilePage): string {
   const parts = page.path.split("/").filter(Boolean);
   const name = parts.pop() ?? page.path;
-  const trail = [page.scope === "user" ? "User" : "Project", ...parts].map((part) => `<span class="crumb">${escapeHtml(part)}</span><span class="crumb-sep">/</span>`).join("");
+  const trail = [page.scope === "user" ? "User" : "Coordinator", ...parts].map((part) => `<span class="crumb">${escapeHtml(part)}</span><span class="crumb-sep">/</span>`).join("");
   return `<span class="crumbs">${trail}<span class="crumb current">${escapeHtml(name)}</span></span>`;
 }
 
@@ -388,11 +386,11 @@ function filePage(page: FilePage): string {
 
 function settingsPage(detail: ProjectDetail): string {
   const draft = state.settings!;
-  return `${subHeader("Project settings")}
+  return `${subHeader("Coordinator settings")}
   <form class="form" data-form="settings">
     <div class="identity">
       <button type="button" class="icon-tile c-${draft.color}" data-action="toggle-picker" title="Choose an icon">${icon(draft.icon, 26)}</button>
-      <input class="title-input" name="name" value="${escapeHtml(detail.project.name)}" placeholder="New Project">
+      <input class="title-input" name="name" value="${escapeHtml(detail.project.name)}" placeholder="New Coordinator">
     </div>
     ${draft.picker ? iconPicker(draft) : ""}
     <div class="field-rows">
@@ -401,7 +399,7 @@ function settingsPage(detail: ProjectDetail): string {
     </div>
     <label class="field"><span>Instructions</span><textarea name="instructions" rows="8" maxlength="16000" placeholder="What every agent should know: conventions, which folder is which, rules no task can break.">${escapeHtml(detail.instructions.trim())}</textarea><span class="hint">Sent to every agent, like an AGENTS.md for the whole project.</span></label>
     <label class="check"><input type="checkbox" name="prFollowUp" ${detail.project.prFollowUp !== false ? "checked" : ""}><span><strong>Follow up on pull requests</strong><em>Send failing checks and requested changes back to the agent that opened the PR.</em></span></label>
-    <div class="form-actions"><button class="btn primary" type="submit">Save</button><button class="btn ghost" type="button" data-action="archive">${icon("archive", 13)}Archive project</button></div>
+    <div class="form-actions"><button class="btn primary" type="submit">Save</button><button class="btn ghost" type="button" data-action="archive">${icon("archive", 13)}Archive coordinator</button></div>
   </form>`;
 }
 
@@ -472,38 +470,25 @@ function iconPicker(draft: Draft): string {
 function createDialog(): string {
   const draft = state.create!;
   return `<div class="modal-scrim" data-action="close-create"></div>
-  <form class="modal" data-form="create" role="dialog" aria-label="Create Project">
-    <div class="modal-head"><div><h2>Create Project</h2><p>Create a focused chat where agents coordinate work</p></div><button type="button" class="icon-btn" data-action="close-create" title="Close">${icon("x", 15)}</button></div>
+  <form class="modal" data-form="create" role="dialog" aria-label="Create Coordinator">
+    <div class="modal-head"><div><h2>Create Coordinator</h2><p>Create a focused chat where agents coordinate work</p></div><button type="button" class="icon-btn" data-action="close-create" title="Close">${icon("x", 15)}</button></div>
     <div class="modal-body">
       <button type="button" class="icon-bare c-${draft.color}" data-action="toggle-picker" title="Choose an icon">${icon(draft.icon, 32)}</button>
       ${draft.picker ? iconPicker(draft) : ""}
-      <input class="title-input center" data-bind="name" value="${escapeHtml(draft.name)}" placeholder="New Project" autocomplete="off" autofocus>
+      <input class="title-input center" data-bind="name" value="${escapeHtml(draft.name)}" placeholder="New Coordinator" autocomplete="off" autofocus>
       <div class="field-rows">
         ${workspaceField(draft)}
         ${fieldRow("Model", modelField(draft))}
       </div>
     </div>
-    <div class="modal-foot"><button class="btn accent" type="submit" ${draft.saving ? "disabled" : ""}>${draft.saving ? `<span class="spinner light"></span>Creating…` : "Create Project"}</button></div>
+    <div class="modal-foot"><button class="btn accent" type="submit" ${draft.saving ? "disabled" : ""}>${draft.saving ? `<span class="spinner light"></span>Creating…` : "Create Coordinator"}</button></div>
   </form>`;
-}
-
-function projectMenu(): string {
-  const snapshot = state.snapshot!;
-  const detail = current();
-  const items = snapshot.projects
-    .map((project: ProjectSummary) => `<button class="menu-item ${project.slug === detail?.project.slug ? "on" : ""}" data-action="select" data-slug="${project.slug}">${projectIcon(project, 15)}<span class="name">${escapeHtml(project.name)}</span>${project.needsYou ? `<span class="badge-soft warning">${project.needsYou}</span>` : ""}</button>`)
-    .join("");
-  return `<div class="menu">${items}<div class="menu-sep"></div>
-    <button class="menu-item" data-action="new-project">${icon("plus", 15)}<span class="name">New Project</span></button>
-    ${detail ? `<button class="menu-item" data-action="settings">${icon("settings", 15)}<span class="name">Project settings</span></button>
-    <button class="menu-item" data-action="open-coordinator">${icon("chat", 15)}<span class="name">Open coordinator chat</span></button>` : ""}
-  </div>`;
 }
 
 function panelView(): string {
   const detail = current();
   if (!detail) {
-    return `<div class="panel"><div class="panel-body">${`<div class="empty"><div class="empty-icon">${icon("layers", 17)}</div><div class="empty-title">No projects yet</div><div class="empty-sub">Create a focused chat where agents coordinate work</div><button class="btn primary" data-action="new-project">${icon("plus", 14)}New Project</button></div>`}</div></div>`;
+    return `<div class="panel"><div class="panel-body">${`<div class="empty"><div class="empty-icon">${icon("layers", 17)}</div><div class="empty-title">No coordinators yet</div><div class="empty-sub">Create a focused chat where agents coordinate work</div><button class="btn primary" data-action="new-project">${icon("plus", 14)}New Coordinator</button></div>`}</div></div>`;
   }
   const page = state.page;
   let body = "";
@@ -517,8 +502,7 @@ function panelView(): string {
     page.kind === "project"
       ? `<header class="panel-head">
           <div class="ph-title">${projectIcon(detail.project, 20)}<h1>${escapeHtml(detail.project.name)}</h1></div>
-          <div class="ph-actions"><button class="icon-btn" data-action="open-coordinator" title="Open coordinator chat">${icon("chat", 15)}</button><button class="icon-btn" data-action="menu" title="More">${icon("more", 15)}</button></div>
-          ${state.menu ? projectMenu() : ""}
+          <div class="ph-actions"><button class="icon-btn" data-action="settings" title="Coordinator settings">${icon("settings", 15)}</button></div>
         </header>`
       : "";
   return `<div class="panel">${head}<div class="panel-body">${body}</div></div>`;
@@ -556,14 +540,14 @@ function homeView(): string {
     .map(([label, members]) => `<div class="plabel">${label}</div>${members.map((project) => projectRow(project, project.slug === detail?.project.slug && state.selected)).join("")}`)
     .join("");
   const list = `<aside class="plist"><div class="plist-resize" data-drag="plist" title="Drag to resize"></div>
-    <div class="plist-top"><label class="search-pill">${icon("search", 15)}<input data-bind="filter" value="${escapeHtml(state.filter)}" placeholder="Search projects" autocomplete="off"></label><button class="icon-btn" data-action="new-project" title="New Project">${icon("plus", 16)}</button></div>
-    <div class="plist-rows">${sections || `<div class="plabel">${snapshot.projects.length ? "No matches" : "No projects yet"}</div>`}</div>
+    <div class="plist-top"><label class="search-pill">${icon("search", 15)}<input data-bind="filter" value="${escapeHtml(state.filter)}" placeholder="Search coordinators" autocomplete="off"></label><button class="icon-btn" data-action="new-project" title="New Coordinator">${icon("plus", 16)}</button></div>
+    <div class="plist-rows">${sections || `<div class="plabel">${snapshot.projects.length ? "No matches" : "No coordinators yet"}</div>`}</div>
   </aside>`;
   let main: string;
   if (!snapshot.projects.length) {
-    main = `<div class="empty center"><div class="empty-glyph">${icon("layers", 30)}</div><div class="empty-title">Create your first project</div><div class="empty-sub">A focused chat where agents coordinate work</div><button class="btn primary" data-action="new-project">${icon("plus", 14)}New Project</button></div>`;
+    main = `<div class="empty center"><div class="empty-glyph">${icon("layers", 30)}</div><div class="empty-title">Create your first coordinator</div><div class="empty-sub">A focused chat where agents coordinate work</div><button class="btn primary" data-action="new-project">${icon("plus", 14)}New Coordinator</button></div>`;
   } else if (!detail || !state.selected) {
-    main = `<div class="empty center"><div class="empty-glyph">${icon("layers", 30)}</div><div class="empty-title">Select a project</div><div class="empty-sub">Choose one from the sidebar to see its agents, notes, and memory</div></div>`;
+    main = `<div class="empty center"><div class="empty-glyph">${icon("layers", 30)}</div><div class="empty-title">Select a coordinator</div><div class="empty-sub">Choose one from the sidebar to see its agents, notes, and memory</div></div>`;
   } else {
     const page = state.page;
     let body = "";
@@ -578,7 +562,7 @@ function homeView(): string {
       : `<button class="btn small primary" data-action="open-coordinator">${icon("chat", 13)}Start coordinator</button>`;
     const head =
       page.kind === "project"
-        ? `<header class="pdetail-head"><div class="ph-title">${projectIcon(detail.project, 20)}<h1>${escapeHtml(detail.project.name)}</h1></div><div class="ph-actions">${chat}<button class="icon-btn" data-action="settings" title="Project settings">${icon("settings", 15)}</button></div></header>`
+        ? `<header class="pdetail-head"><div class="ph-title">${projectIcon(detail.project, 20)}<h1>${escapeHtml(detail.project.name)}</h1></div><div class="ph-actions">${chat}<button class="icon-btn" data-action="settings" title="Coordinator settings">${icon("settings", 15)}</button></div></header>`
         : "";
     main = `${head}<div class="pdetail-body">${body}</div>`;
   }
@@ -629,7 +613,6 @@ function openCreate(): void {
   const pick = PROJECT_ICONS[Math.floor(Math.random() * PROJECT_ICONS.length)];
   state.create = { name: "", icon: pick, color: "gray", workspace: "", otherPath: "", model: "", effort: "", picker: false, saving: false };
   state.dropdown = undefined;
-  state.menu = false;
   render();
   void loadOptions();
 }
@@ -706,7 +689,6 @@ async function onAction(target: HTMLElement): Promise<void> {
   const detail = current();
   switch (action) {
     case "select":
-      state.menu = false;
       state.selected = true;
       state.page = { kind: "project" };
       return run(async () => {
@@ -714,9 +696,6 @@ async function onAction(target: HTMLElement): Promise<void> {
         state.snapshot = data.snapshot as Snapshot;
         if (state.mode === "home" && target.dataset.slug) await openCoordinator(target.dataset.slug);
       });
-    case "menu":
-      state.menu = !state.menu;
-      return render();
     case "new-project":
       return openCreate();
     case "close-create":
@@ -756,7 +735,6 @@ async function onAction(target: HTMLElement): Promise<void> {
       return;
     }
     case "settings":
-      state.menu = false;
       if (!detail) return;
       openSettings(detail);
       return;
@@ -808,7 +786,6 @@ async function onAction(target: HTMLElement): Promise<void> {
     case "file-save":
       return saveFile();
     case "open-coordinator":
-      state.menu = false;
       if (!detail) return;
       return run(() => openCoordinator(detail.project.slug));
     case "open-thread":
@@ -855,7 +832,7 @@ async function onAction(target: HTMLElement): Promise<void> {
         const result = await host.call("ui_project_save", { project: detail.project.slug, archived: true });
         state.snapshot = result.snapshot;
         state.page = { kind: "project" };
-      }, "Project archived");
+      }, "Coordinator archived");
   }
 }
 
@@ -869,7 +846,7 @@ async function onSubmit(form: HTMLFormElement): Promise<void> {
     render();
     try {
       const result = await host.call("ui_project_save", {
-        name: draft.name.trim() || "New Project",
+        name: draft.name.trim() || "New Coordinator",
         icon: draft.icon,
         color: draft.color,
         repos: workspace ? [workspace] : [],
@@ -922,11 +899,6 @@ async function onSubmit(form: HTMLFormElement): Promise<void> {
 
 root.addEventListener("click", (event) => {
   const element = event.target as HTMLElement;
-  if (state.menu && !element.closest(".menu, [data-action='menu']")) {
-    state.menu = false;
-    render();
-    return;
-  }
   if (state.dropdown && !element.closest(".dd")) {
     state.dropdown = undefined;
     render();
@@ -1055,7 +1027,6 @@ root.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     if (state.dropdown) state.dropdown = undefined;
     else if (state.create) state.create = undefined;
-    else if (state.menu) state.menu = false;
     else if (state.page.kind === "file" && isDirty(state.page)) return;
     else if (state.page.kind !== "project") {
       state.page = { kind: "project" };

@@ -92,7 +92,7 @@ function registerMentions(server: McpServer): void {
   server.registerResource(
     "project-digest",
     new ResourceTemplate("project://{slug}", { list: undefined }),
-    { title: "Project", mimeType: "text/markdown" },
+    { title: "Coordinator", mimeType: "text/markdown" },
     async (uri, variables) => ({ contents: [{ uri: uri.href, mimeType: "text/markdown", text: await contextDigest(String(variables.slug)) }] }),
   );
 }
@@ -124,7 +124,7 @@ export function registerTools(server: McpServer, html: string): void {
       inputSchema: z.object({}),
       annotations: readOnly,
       icons: [ICON],
-      _meta: ui([{ type: "global", quickAction: { title: "New Project", icons: [PLUS_ICON], target: { type: "tool", name: "project_new", arguments: {} } } }]),
+      _meta: ui([{ type: "global", quickAction: { title: "New Coordinator", icons: [PLUS_ICON], target: { type: "tool", name: "project_new", arguments: {} } } }]),
     } as any,
     (async (_args: unknown, extra: any) => {
       return view(await snapshot(undefined, threadOf(extra)), { mode: "home" });
@@ -134,8 +134,8 @@ export function registerTools(server: McpServer, html: string): void {
   server.registerTool(
     "project_new",
     {
-      title: "New Project",
-      description: "Open the Create Project dialog.",
+      title: "New Coordinator",
+      description: "Open the Create Coordinator dialog.",
       inputSchema: z.object({}),
       annotations: readOnly,
       _meta: { ui: { resourceUri: UI_URI, visibility: ["app"] } },
@@ -146,8 +146,8 @@ export function registerTools(server: McpServer, html: string): void {
   server.registerTool(
     "project_panel",
     {
-      title: "Project",
-      description: "Open the project status panel beside this conversation.",
+      title: "Coordinator",
+      description: "Open the coordinator panel with the project's notes, agents, memory, and files beside this conversation.",
       inputSchema: z.object({}),
       annotations: readOnly,
       icons: [ICON],
@@ -160,7 +160,7 @@ export function registerTools(server: McpServer, html: string): void {
     "project_open",
     {
       title: "Show project",
-      description: "Show a project's status card in this conversation. Only when the user asks to see the project; the Project Coordinator page and the Project panel already show it.",
+      description: "Show a project's status card in this conversation. Only when the user asks to see the project; the Project Coordinator page and the Coordinator panel already show it.",
       inputSchema: z.object({ project: projectArg.optional() }),
       annotations: readOnly,
       _meta: { ui: { resourceUri: UI_URI } },
@@ -476,7 +476,7 @@ export function registerTools(server: McpServer, html: string): void {
 
   server.registerTool(
     "ui_create_options",
-    { title: "Create options", description: "Models and workspaces for the Create Project dialog.", inputSchema: z.object({}), annotations: readOnly, _meta: appOnly },
+    { title: "Create options", description: "Models and workspaces for the Create Coordinator dialog.", inputSchema: z.object({}), annotations: readOnly, _meta: appOnly },
     async () => text("options", await createOptions()),
   );
 
@@ -586,7 +586,7 @@ export function registerTools(server: McpServer, html: string): void {
       _meta: appOnly,
     },
     async ({ project, ...fields }) => {
-      const record = project ? await updateProject(project, fields) : await createProject({ ...fields, name: fields.name?.trim() || "New Project" });
+      const record = project ? await updateProject(project, fields) : await createProject({ ...fields, name: fields.name?.trim() || "New Coordinator" });
       await rememberProject(record.slug);
       return view(await snapshot(record.slug), { saved: record.slug });
     },

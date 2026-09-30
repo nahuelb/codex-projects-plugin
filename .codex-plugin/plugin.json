@@ -1,7 +1,7 @@
 {
   "name": "codex-projects-plugin",
   "version": "0.1.0",
-  "description": "Project Coordinator for Codex, inspired by Cursor Projects and Claude Code Projects: one coordinator chat per project, parallel Codex agents, durable memory, and a project panel inside Codex.",
+  "description": "Project Coordinator for Codex, inspired by Cursor Projects and Claude Code Projects: one coordinator chat per project, parallel Codex agents, durable memory, and a coordinator panel inside Codex.",
   "author": {
     "name": "nahuelb",
     "url": "https://github.com/nahuelb"
