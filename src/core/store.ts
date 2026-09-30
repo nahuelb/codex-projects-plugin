@@ -27,6 +27,7 @@ import {
   withFileLock,
   mtimeIso,
   nowIso,
+  processAlive,
   readJson,
   readText,
   slugify,
@@ -34,7 +35,7 @@ import {
   writeTextAtomic,
 } from "./fsutil.ts";
 import { parseFrontmatter, parseNotes, renderFrontmatter } from "./markdown.ts";
-import { PROJECT_SUBDIRS, checkSlug, paths } from "./paths.ts";
+import { PROJECT_SUBDIRS, checkSlug, legacyRootDir, paths, pluginDataDir } from "./paths.ts";
 
 export const MEMORY_TYPES = ["user", "feedback", "project", "reference"] as const;
 export const MEMORY_INDEX_MAX_LINES = 200;
@@ -69,7 +70,43 @@ function normalizeRepos(repos: string[] | undefined): string[] {
   return [...new Set((repos ?? []).map((repo) => repo.trim()).filter(Boolean).map((repo) => path.resolve(repo.replace(/^~(?=$|\/)/, process.env.HOME ?? "~"))))];
 }
 
+const LEGACY_STOP_WAIT_MS = 5_000;
+
+export async function migrateLegacyRoot(legacy = legacyRootDir(), target = pluginDataDir()): Promise<boolean> {
+  if (process.env.PROJECTS_COORDINATOR_HOME && legacy === legacyRootDir()) return false;
+  if (legacy === target || (await exists(target)) || !(await exists(legacy))) return false;
+  const legacyAgents = path.join(legacy, "projects");
+  for (const project of await readdir(legacyAgents).catch(() => [] as string[])) {
+    const dir = path.join(legacyAgents, project, "agents");
+    for (const file of await readdir(dir).catch(() => [] as string[])) {
+      if (!file.endsWith(".json")) continue;
+      const agent = await readJson<AgentRecord>(path.join(dir, file)).catch(() => undefined);
+      if (agent && !agent.resolved && (agent.status === "working" || agent.status === "starting")) return false;
+    }
+  }
+  const pid = Number((await readText(path.join(legacy, "run", "coordd.pid"))).trim());
+  if (processAlive(pid)) {
+    process.kill(pid, "SIGTERM");
+    const deadline = Date.now() + LEGACY_STOP_WAIT_MS;
+    while (processAlive(pid)) {
+      if (Date.now() > deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  await ensureDir(path.dirname(target));
+  try {
+    await rename(legacy, target);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "EEXIST" || code === "ENOTEMPTY" || code === "EXDEV") return false;
+    throw error;
+  }
+  for (const stale of ["coordd.sock", "coordd.pid", "coordd.lock"]) await rm(path.join(target, "run", stale), { force: true });
+  return true;
+}
+
 export async function ensureRoot(): Promise<void> {
+  await migrateLegacyRoot();
   await ensureDir(paths.projects());
   await ensureDir(paths.run());
   await ensureDir(paths.user());

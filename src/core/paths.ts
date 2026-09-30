@@ -1,10 +1,34 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+export const PLUGIN_NAME = "codex-projects-plugin";
+const DEFAULT_MARKETPLACE = "personal";
+
+export function codexHomeDir(): string {
+  return process.env.CODEX_HOME ? path.resolve(process.env.CODEX_HOME) : path.join(os.homedir(), ".codex");
+}
+
+export function pluginDataDir(script = fileURLToPath(import.meta.url)): string {
+  const parts = path.resolve(script).split(path.sep);
+  const at = parts.lastIndexOf(PLUGIN_NAME);
+  const installed = at >= 3 && parts[at - 3] === "plugins" && parts[at - 2] === "cache";
+  const codexHome = installed ? parts.slice(0, at - 3).join(path.sep) || path.sep : codexHomeDir();
+  const marketplace = installed ? parts[at - 1] : DEFAULT_MARKETPLACE;
+  return path.join(codexHome, "plugins", "data", `${PLUGIN_NAME}-${marketplace}`);
+}
+
+export function legacyRootDir(): string {
+  return path.join(os.homedir(), ".projects-coordinator");
+}
 
 export function rootDir(): string {
   const override = process.env.PROJECTS_COORDINATOR_HOME;
-  return override ? path.resolve(override) : path.join(os.homedir(), ".projects-coordinator");
+  if (override) return path.resolve(override);
+  const preferred = pluginDataDir();
+  return !existsSync(preferred) && existsSync(legacyRootDir()) ? legacyRootDir() : preferred;
 }
 
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;

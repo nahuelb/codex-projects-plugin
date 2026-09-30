@@ -179,3 +179,29 @@ test("only one caller takes over a stale lock", async () => {
   const wins = await Promise.all(Array.from({ length: 6 }, () => tryLockFile(lock, (owner) => !processAlive(owner.pid))));
   assert.equal(wins.filter(Boolean).length, 1);
 });
+
+test("the data folder follows the Codex plugin data layout", async () => {
+  const { pluginDataDir } = await import("../src/core/paths.ts");
+  const script = path.join("/Users/me/.codex", "plugins", "cache", "acme", "codex-projects-plugin", "0.1.0", "dist", "server.js");
+  assert.equal(pluginDataDir(script), path.join("/Users/me/.codex", "plugins", "data", "codex-projects-plugin-acme"));
+  assert.match(pluginDataDir("/src/checkout/dist/server.js"), /plugins\/data\/codex-projects-plugin-personal$/);
+});
+
+test("the legacy data folder moves into the plugin data folder once", async () => {
+  const { mkdir, writeFile, stat: statFile } = await import("node:fs/promises");
+  const base = await mkdtemp(path.join(os.tmpdir(), "pc-move-"));
+  const legacy = path.join(base, ".projects-coordinator");
+  const target = path.join(base, ".codex", "plugins", "data", "codex-projects-plugin-personal");
+  await mkdir(path.join(legacy, "projects", "alpha", "agents"), { recursive: true });
+  await mkdir(path.join(legacy, "run"), { recursive: true });
+  await writeFile(path.join(legacy, "projects", "alpha", "notes.md"), "hello\n");
+  await writeFile(path.join(legacy, "run", "coordd.pid"), "2147483646\n");
+  await writeFile(path.join(legacy, "projects", "alpha", "agents", "a-001.json"), JSON.stringify({ status: "working", resolved: false }));
+  assert.equal(await store.migrateLegacyRoot(legacy, target), false);
+  await writeFile(path.join(legacy, "projects", "alpha", "agents", "a-001.json"), JSON.stringify({ status: "idle", resolved: false }));
+  assert.equal(await store.migrateLegacyRoot(legacy, target), true);
+  assert.equal(await readFile(path.join(target, "projects", "alpha", "notes.md"), "utf8"), "hello\n");
+  await assert.rejects(statFile(legacy));
+  await assert.rejects(statFile(path.join(target, "run", "coordd.pid")));
+  assert.equal(await store.migrateLegacyRoot(legacy, target), false);
+});

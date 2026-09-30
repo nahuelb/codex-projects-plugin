@@ -35,7 +35,7 @@ Restart the Codex app, then open **Project Coordinator** in the sidebar and clic
 
 `install:local` copies the built plugin to `~/plugins/codex-projects-plugin` and lists it in `~/.agents/plugins/marketplace.json`.
 
-To update, pull and run `npm run install:local` again, then restart Codex. To remove it, run `codex plugin remove codex-projects-plugin@personal`. Your projects stay in `~/.projects-coordinator` until you delete that folder.
+To update, pull and run `npm run install:local` again, then restart Codex. To remove it, run `codex plugin remove codex-projects-plugin@personal`. Your projects stay in `~/.codex/plugins/data/codex-projects-plugin-personal` until you delete that folder.
 
 ## How it works
 
@@ -43,7 +43,8 @@ To update, pull and run `npm run install:local` again, then restart Codex. To re
 Codex app ── MCP (stdio) ──► dist/server.js ── unix socket ──► dist/daemon.js (coordd)
    │  Coordinator page + panel (MCP App UI)          │                 └─ codex app-server (agents, models,
    │  coordinator chat with $coordinator skill       │                    thread names)
-   └─────────────────────────────────────────────────┴── ~/.projects-coordinator/ (files are the record)
+   └─────────────────────────────────────────────────┴── ~/.codex/plugins/data/codex-projects-plugin-personal/
+                                                           (files are the record)
 ```
 
 - The MCP server is stateless. It reads and writes project files and forwards agent commands to `coordd`.
@@ -52,8 +53,10 @@ Codex app ── MCP (stdio) ──► dist/server.js ── unix socket ──�
 
 ## Data
 
+The plugin keeps its data where Codex keeps data for every plugin: `~/.codex/plugins/data/<plugin>-<marketplace>`. With the local install, that is:
+
 ```
-~/.projects-coordinator/
+~/.codex/plugins/data/codex-projects-plugin-personal/
   projects/<slug>/
     project.json      name, icon, color, workspace, model, coordinator chat id
     INSTRUCTIONS.md   standing instructions for every agent
@@ -66,7 +69,7 @@ Codex app ── MCP (stdio) ──► dist/server.js ── unix socket ──�
   user/preferences.md cross-project preferences
 ```
 
-Set `PROJECTS_COORDINATOR_HOME` to use another folder.
+Earlier versions used `~/.projects-coordinator`. The plugin moves that folder here the first time it starts, when no agent is working. Set `PROJECTS_COORDINATOR_HOME` to use another folder.
 
 ## Notes and limits
 
