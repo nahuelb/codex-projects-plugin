@@ -60,6 +60,7 @@ export interface AgentRecord {
   baseSha?: string;
   model?: string;
   effort?: string;
+  parentThreadId?: string;
   threadId?: string;
   nickname?: string;
   status: AgentStatus;

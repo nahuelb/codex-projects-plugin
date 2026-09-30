@@ -5,14 +5,16 @@ import { createTaskWorktree, isGitRepo, removeTaskWorktree } from "./git.ts";
 import { parseReport } from "./markdown.ts";
 import { paths } from "./paths.ts";
 import { fetchPullRequest, isPullRequestUrl, prEvents, type PrEvent } from "./pr.ts";
-import { findRollout, isRunning, readChildState, readSpawnedChildren, type SpawnedChild } from "./rollout.ts";
+import { findRollout, isRunning, isThreadId, readChildState, readSpawnedChildren, type SpawnedChild } from "./rollout.ts";
 import { addInbox, getAgent, getProject, listAgents, nextAgentId, saveAgent, touchProject } from "./store.ts";
 
 const PR_RECHECK_MS = 2 * 60_000;
 
-export function taskNameFor(id: string, title: string): string {
-  const words = slugify(title, 28).replace(/-/g, "_");
-  return `${id.replace("-", "")}_${words}`.replace(/_+$/, "");
+export function taskNameFor(title: string, taken: Iterable<string> = []): string {
+  const stem = slugify(title, 40).replace(/-/g, "_").replace(/^(\d)/, "task_$1") || "task";
+  const used = new Set(taken);
+  if (!used.has(stem)) return stem;
+  for (let suffix = 2; ; suffix += 1) if (!used.has(`${stem}_${suffix}`)) return `${stem}_${suffix}`;
 }
 
 export interface PrepareInput {
@@ -24,6 +26,7 @@ export interface PrepareInput {
   base?: string;
   model?: string;
   effort?: string;
+  parentThreadId?: string;
 }
 
 export async function prepareAgent(input: PrepareInput): Promise<AgentRecord> {
@@ -36,18 +39,20 @@ export async function prepareAgent(input: PrepareInput): Promise<AgentRecord> {
   if (isolation === "worktree" && !repo) throw new Error("A worktree needs a repository. Add one to the project or pass repo.");
   if (isolation === "worktree" && !(await isGitRepo(repo!))) throw new Error(`${repo} is not a git repository. Use isolation "shared".`);
   const id = await nextAgentId(project.slug);
+  const taken = (await listAgents(project.slug)).map((existing) => existing.taskName);
   const now = nowIso();
   const agent: AgentRecord = {
     id,
     slug: project.slug,
     title,
     task: input.task.trim(),
-    taskName: taskNameFor(id, title),
+    taskName: taskNameFor(title, taken),
     isolation,
     repo,
     cwd: repo ?? paths.project(project.slug),
     model: input.model?.trim() || project.model,
     effort: input.effort?.trim() || project.effort,
+    parentThreadId: isThreadId(input.parentThreadId) ? input.parentThreadId : project.coordinatorThreadId,
     status: "prepared",
     createdAt: now,
     updatedAt: now,
@@ -75,9 +80,9 @@ function matchChild(children: Map<string, SpawnedChild>, taskName: string): Spaw
 
 const iso = (ms: number | undefined) => (ms ? new Date(ms).toISOString() : undefined);
 
-async function coordinatorChildren(project: ProjectRecord): Promise<Map<string, SpawnedChild>> {
+async function spawnedChildren(project: ProjectRecord, agents: AgentRecord[]): Promise<Map<string, SpawnedChild>> {
   const merged = new Map<string, SpawnedChild>();
-  const ids = [...new Set([...(project.pastThreadIds ?? []), project.coordinatorThreadId].filter((id): id is string => Boolean(id)))];
+  const ids = [...new Set([...(project.pastThreadIds ?? []), project.coordinatorThreadId, ...agents.map((agent) => agent.parentThreadId)].filter((id): id is string => isThreadId(id)))];
   for (const threadId of ids) {
     const file = await findRollout(threadId).catch(() => undefined);
     if (!file) continue;
@@ -123,9 +128,9 @@ async function refreshAgent(agent: AgentRecord, child: SpawnedChild): Promise<Ag
 export async function syncProject(slug: string): Promise<number> {
   const project = await getProject(slug);
   const open = (await listAgents(slug)).filter((agent) => !agent.resolved);
-  if (!open.length || (!project.coordinatorThreadId && !project.pastThreadIds?.length)) return 0;
+  if (!open.length) return 0;
   return withFileLock(path.join(paths.agentsDir(slug), "sync"), async () => {
-    const children = await coordinatorChildren(project);
+    const children = await spawnedChildren(project, open);
     if (!children.size) return 0;
     let changed = 0;
     for (const stale of open) {

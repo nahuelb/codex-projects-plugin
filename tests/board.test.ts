@@ -37,7 +37,10 @@ test("the board follows a native subagent from start to report", async () => {
   await store.updateProject(project.slug, { coordinatorThreadId: coordinator });
   const agent = await board.prepareAgent({ slug: project.slug, title: "Cache users", task: "Add a cache to /users." });
   assert.equal(agent.status, "prepared");
-  assert.equal(agent.taskName, "a001_cache_users");
+  assert.equal(agent.taskName, "cache_users");
+  const twin = await board.prepareAgent({ slug: project.slug, title: "Cache users", task: "Again." });
+  assert.equal(twin.taskName, "cache_users_2");
+  await board.resolveAgent(project.slug, twin.id);
   assert.equal(store.agentGroup(agent), "working");
 
   const child = threadId();
@@ -91,4 +94,19 @@ test("tasks the coordinator has not spawned stay prepared and age out of Working
 test("findRollout ignores ids that are not thread ids", async () => {
   assert.equal(await rollout.findRollout("../../etc/passwd"), undefined);
   assert.equal(rollout.isThreadId("01a0f373-576e-74c3-8a44-8039098c7269"), true);
+});
+
+test("agents started from another chat of the project are still followed", async () => {
+  const project = await store.createProject({ name: "Second Chat" });
+  await store.updateProject(project.slug, { coordinatorThreadId: threadId() });
+  const otherChat = threadId();
+  const otherFile = await rolloutFile(otherChat);
+  const agent = await board.prepareAgent({ slug: project.slug, title: "Todo inventory", task: "List TODOs.", parentThreadId: otherChat });
+  assert.equal(agent.parentThreadId, otherChat);
+  const child = threadId();
+  const childFile = await rolloutFile(child);
+  await appendFile(childFile, line({ type: "event_msg", payload: { type: "task_started", started_at: Math.floor(Date.now() / 1000) } }));
+  await appendFile(otherFile, activity("started", child, `/root/${agent.taskName}`));
+  assert.equal(await board.syncProject(project.slug), 1);
+  assert.equal((await store.getAgent(project.slug, agent.id)).status, "working");
 });

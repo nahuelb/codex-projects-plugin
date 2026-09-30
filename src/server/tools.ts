@@ -269,9 +269,9 @@ export function registerTools(server: McpServer, html: string): void {
       }),
       annotations: writes,
     },
-    async ({ project, ...rest }) => {
+    async ({ project, ...rest }, extra: any) => {
       const record = await resolveProject(project);
-      const agent = await prepareAgent({ slug: record.slug, ...rest });
+      const agent = await prepareAgent({ slug: record.slug, ...rest, parentThreadId: threadOf(extra) });
       const brief = await composeBrief(record, agent);
       const spawn: Record<string, string> = { task_name: agent.taskName, fork_turns: "none", message: brief };
       if (agent.model) spawn.model = agent.model;

@@ -102,7 +102,7 @@ async function agent(slug: string, input: Partial<AgentRecord> & Pick<AgentRecor
   const place = repo ? await worktree(repo, input.id, input.title) : undefined;
   const record: AgentRecord = {
     slug,
-    taskName: taskNameFor(input.id, input.title),
+    taskName: taskNameFor(input.title),
     isolation: repo ? "worktree" : "shared",
     repo,
     cwd: place?.cwd ?? paths.project(slug),
