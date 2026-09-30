@@ -4,6 +4,8 @@ Project Coordinator is a Codex plugin inspired by Cursor Projects and Claude Cod
 
 The prompts and code are original. See [docs/design.md](docs/design.md) for how each pattern maps here and what is not built yet.
 
+> **Status: experimental.** Tested on macOS with the Codex desktop app. It relies on Codex's MCP extensions and on `codex app-server` requests such as `thread/fork`, and on `codex://` deep links. These can change between Codex releases. It is not affiliated with OpenAI, Cursor, or Anthropic.
+
 ## What you get
 
 - **Create Project.** Pick an icon, a name, a workspace, and a model. Project Coordinator opens the project's coordinator chat in that workspace with the kickoff message ready to send.
@@ -22,6 +24,8 @@ The prompts and code are original. See [docs/design.md](docs/design.md) for how 
 Requires Node 22.18+, the Codex app, and the `codex` CLI signed in.
 
 ```sh
+git clone https://github.com/nahuelb/codex-projects-plugin.git
+cd codex-projects-plugin
 npm install
 npm run install:local
 codex plugin add codex-projects-plugin@personal
@@ -30,6 +34,8 @@ codex plugin add codex-projects-plugin@personal
 Restart the Codex app, then open **Project Coordinator** in the sidebar and click **New Project**.
 
 `install:local` copies the built plugin to `~/plugins/codex-projects-plugin` and lists it in `~/.agents/plugins/marketplace.json`.
+
+To update, pull and run `npm run install:local` again, then restart Codex. To remove it, run `codex plugin remove codex-projects-plugin@personal`. Your projects stay in `~/.projects-coordinator` until you delete that folder.
 
 ## How it works
 
@@ -67,6 +73,7 @@ Set `PROJECTS_COORDINATOR_HOME` to use another folder.
 - Codex agents run with the `workspace-write` sandbox, approval `never`, network on, and write access to their worktree and the repository's `.git` folder. Set `PROJECTS_CODEX_NETWORK=0` to turn network off.
 - PR follow-up needs `gh` signed in. It runs while the background service is up.
 - The plugin launches your own signed-in `codex` CLI. It never handles your credentials.
+- Agents act on your machine without asking for approval, inside the sandbox above. Review what you ask the coordinator to start, and keep project instructions free of secrets: they are sent to every agent.
 - The Project Coordinator page, Project panel, quick action, mentions, deep links, and file tabs use OpenAI's MCP extensions. Other MCP hosts show the plain MCP App, if they support MCP Apps. There, files open in a built-in viewer with Preview and Source modes.
 - Mobile needs a hosted endpoint and is not built yet.
 
@@ -79,4 +86,6 @@ npm run typecheck
 npm run preview    # the UI in a browser at http://localhost:4321/?mode=panel (or ?mode=home)
 ```
 
-MIT licensed.
+## License
+
+MIT. See [LICENSE](LICENSE).

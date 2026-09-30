@@ -4,6 +4,23 @@
   "private": true,
   "description": "Project Coordinator for Codex, inspired by Cursor Projects and Claude Code Projects: a coordinator chat per project, parallel Codex agents, durable memory, and a project UI inside Codex.",
   "license": "MIT",
+  "author": "nahuelb",
+  "homepage": "https://github.com/nahuelb/codex-projects-plugin#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nahuelb/codex-projects-plugin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nahuelb/codex-projects-plugin/issues"
+  },
+  "keywords": [
+    "codex",
+    "codex-plugin",
+    "mcp",
+    "mcp-apps",
+    "agents",
+    "project-coordinator"
+  ],
   "type": "module",
   "engines": {
     "node": ">=22.18"

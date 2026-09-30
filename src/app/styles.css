@@ -103,7 +103,6 @@ pre code { background: none; padding: 0; }
 .btn:disabled { opacity: 0.6; cursor: default; }
 .spinner.light { border-color: #fff; border-right-color: transparent; }
 
-/* shared rows */
 .block { margin-bottom: 18px; }
 .label { font-size: var(--text-sm); color: var(--fg-3); font-weight: var(--w-medium); padding: 0 6px 6px; }
 .section-head { display: flex; align-items: center; gap: 6px; width: 100%; height: 30px; padding: 0 8px; border-radius: var(--r-md); color: var(--fg-3); font-size: 14px; line-height: 21px; font-weight: 500; }
@@ -210,7 +209,6 @@ pre code { background: none; padding: 0; }
 .source { display: block; width: 100%; min-height: calc(100vh - 160px); border: 0; outline: none; resize: none; padding: 4px 0; background: none; font-family: var(--mono); font-size: 12.5px; line-height: 1.65; color: var(--fg); tab-size: 2; }
 .tree-empty { padding: 6px 8px 6px calc(8px + var(--depth) * 18px + 24px); color: var(--fg-3); font-size: var(--text-sm); }
 
-/* side panel: the Cursor-style Project panel */
 .panel { display: flex; flex-direction: column; min-height: 100vh; }
 body.fullscreen .panel { height: 100vh; min-height: 0; }
 body:not(.fullscreen) .panel { min-height: 0; }
@@ -257,7 +255,6 @@ body:not(.fullscreen) .panel { min-height: 0; }
 .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--fg-2); }
 .send { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--fg); color: var(--bg); }
 
-/* forms */
 .form { display: flex; flex-direction: column; gap: 16px; padding: 4px 2px 16px; }
 .identity { display: flex; align-items: center; gap: 12px; }
 .icon-tile { display: grid; place-items: center; width: 44px; height: 44px; border-radius: var(--r-xl); background: var(--fill-2); color: var(--pc, var(--fg-2)); flex: none; corner-shape: superellipse(1.5); }
@@ -306,7 +303,6 @@ body:not(.fullscreen) .panel { min-height: 0; }
 .dd-sub { color: var(--fg-3); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dd-check { color: var(--fg-2); flex: none; }
 
-/* Create Project dialog: Cursor's structure at Codex's type scale */
 .modal-scrim { position: fixed; inset: 0; background: light-dark(rgb(0 0 0 / 18%), rgb(0 0 0 / 45%)); z-index: 40; }
 .modal { position: fixed; z-index: 41; left: 50%; top: max(24px, 14vh); transform: translateX(-50%); width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 48px); display: flex; flex-direction: column; background: var(--elevated); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
 .modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 14px 12px 0 17px; }
@@ -328,7 +324,6 @@ body:not(.fullscreen) .panel { min-height: 0; }
 .agent-link:hover { text-decoration: none; }
 .agent-link:hover strong { text-decoration-color: currentColor; }
 
-/* Project Coordinator page (sidebar entrypoint): list | project | Codex chat panel. Tokens match Codex Code Review. */
 body:has(.home) { background: var(--page); }
 .home { --plist-w: 260px; display: grid; grid-template-columns: var(--plist-w) minmax(0, 1fr); height: 100vh; background: var(--page); }
 .plist { position: relative; display: flex; flex-direction: column; min-height: 0; }
