@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -57,27 +56,11 @@ export const paths = {
   memoryDir: (slug: string) => path.join(projectDir(slug), "memory"),
   agentsDir: (slug: string) => path.join(projectDir(slug), "agents"),
   agentJson: (slug: string, id: string) => path.join(projectDir(slug), "agents", `${checkAgentId(id)}.json`),
-  agentDir: (slug: string, id: string) => path.join(projectDir(slug), "agents", checkAgentId(id)),
   inboxDir: (slug: string) => path.join(projectDir(slug), "inbox"),
   inboxDoneDir: (slug: string) => path.join(projectDir(slug), "inbox", "done"),
-  workDir: (slug: string, id: string) => path.join(projectDir(slug), "work", checkAgentId(id)),
-  worktreesDir: (slug: string) => path.join(rootDir(), "worktrees", checkSlug(slug)),
   user: () => path.join(rootDir(), "user"),
   preferences: () => path.join(rootDir(), "user", "preferences.md"),
   run: () => path.join(rootDir(), "run"),
-  socket: () => socketPath(),
-  pidFile: () => path.join(rootDir(), "run", "coordd.pid"),
-  lockFile: () => path.join(rootDir(), "run", "coordd.lock"),
-  daemonLog: () => path.join(rootDir(), "run", "coordd.log"),
 };
 
-export const PROJECT_SUBDIRS = ["docs", "plans", "internal", "memory", "agents", "inbox", "inbox/done", "work"];
-
-const MAX_SOCKET_PATH = 100;
-
-function socketPath(): string {
-  const preferred = path.join(rootDir(), "run", "coordd.sock");
-  if (preferred.length <= MAX_SOCKET_PATH) return preferred;
-  const hash = createHash("sha256").update(rootDir()).digest("hex").slice(0, 12);
-  return path.join(os.tmpdir(), `projects-coordd-${hash}.sock`);
-}
+export const PROJECT_SUBDIRS = ["docs", "plans", "internal", "memory", "agents", "inbox", "inbox/done"];

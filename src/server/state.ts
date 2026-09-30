@@ -5,8 +5,9 @@ import type { ModelOption, Snapshot } from "../shared/types.ts";
 import { VERSION } from "../shared/version.ts";
 import { readJson, withFileLock, writeJsonAtomic } from "../core/fsutil.ts";
 import { paths, rootDir } from "../core/paths.ts";
+import { refreshPullRequests, syncProject } from "../core/board.ts";
 import { getProject, listProjects, projectDetail, projectSummary, updateProject } from "../core/store.ts";
-import { callDaemon, daemonStatus } from "../daemon/client.ts";
+import { archiveThread, listCreateOptions, relocateThread, renameThread } from "./codex.ts";
 
 const run = promisify(execFile);
 
@@ -37,8 +38,7 @@ async function archiveLater(threadIds: string[]): Promise<void> {
   });
   const archived: string[] = [];
   for (const threadId of pending) {
-    const result = await callDaemon<{ archived: boolean }>("thread.archive", { threadId }, 30_000).catch(() => ({ archived: false }));
-    if (result.archived) archived.push(threadId);
+    if (await archiveThread(threadId)) archived.push(threadId);
   }
   if (!archived.length) return;
   await withFileLock(archiveFile(), async () => {
@@ -78,7 +78,7 @@ export async function coordinatorThread(slug: string): Promise<string | undefine
   const repo = project.repos[0];
   if (!threadId || !repo) return threadId;
   try {
-    const moved = await callDaemon<{ threadId: string; moved: boolean; archived: boolean }>("thread.relocate", { threadId, cwd: repo, name: coordinatorThreadName(project.name) }, 90_000);
+    const moved = await relocateThread(threadId, repo, coordinatorThreadName(project.name));
     if (moved.moved) {
       await updateProject(slug, { coordinatorThreadId: moved.threadId });
       await mapThread(moved.threadId, slug);
@@ -97,34 +97,35 @@ export async function bindThread(threadId: string | undefined, slug: string): Pr
   const project = await getProject(slug);
   if (project.coordinatorThreadId && project.coordinatorThreadId !== threadId) return;
   if (!project.coordinatorThreadId) await updateProject(slug, { coordinatorThreadId: threadId });
-  void callDaemon("thread.adopt", { threadId, name: coordinatorThreadName(project.name) }, 30_000).catch(() => undefined);
+  void renameThread(threadId, coordinatorThreadName(project.name)).catch(() => undefined);
 }
 
 let optionsCache: { at: number; models: ModelOption[]; workspaces: string[] } | undefined;
 
 export async function createOptions(): Promise<{ models: ModelOption[]; workspaces: string[] }> {
   if (optionsCache && Date.now() - optionsCache.at < 60_000) return optionsCache;
-  const [models, workspaces] = await Promise.all([
-    callDaemon<ModelOption[]>("models.list", {}, 30_000).catch(() => [] as ModelOption[]),
-    callDaemon<string[]>("workspaces.list", { exclude: [paths.root()] }, 30_000).catch(() => [] as string[]),
-  ]);
+  const { models, workspaces } = await listCreateOptions([paths.root()]).catch(() => ({ models: [] as ModelOption[], workspaces: [] as string[] }));
   const known = (await listProjects(true)).flatMap((project) => project.repos);
   optionsCache = { at: Date.now(), models, workspaces: [...new Set([...known, ...workspaces])] };
   return optionsCache;
 }
 
+export async function syncBoards(slugs: string[]): Promise<void> {
+  await Promise.all(slugs.map((slug) => syncProject(slug).catch(() => 0)));
+  for (const slug of slugs) void refreshPullRequests(slug).catch(() => 0);
+}
+
 export async function snapshot(requested?: string, threadId?: string): Promise<Snapshot> {
   const projects = await listProjects();
+  await syncBoards(projects.map((project) => project.slug));
   const summaries = await Promise.all(projects.map(projectSummary));
   summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const threadProject = await projectForThread(threadId);
   const preferred = requested || threadProject || (await lastProject());
   const slug = projects.find((project) => project.slug === preferred)?.slug ?? summaries[0]?.slug;
-  const service = await daemonStatus();
   return {
     version: VERSION,
     root: rootDir(),
-    service: { running: service.running, pid: service.pid },
     codex: await codexAvailable(),
     projects: summaries,
     current: slug ? await projectDetail(slug) : undefined,

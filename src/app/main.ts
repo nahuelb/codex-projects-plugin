@@ -1,6 +1,6 @@
 import { App, applyDocumentTheme, applyHostFonts, applyHostStyleVariables, type McpUiHostContext } from "@modelcontextprotocol/ext-apps";
 import { OpenAIExtensions } from "@openai/mcp-extensions/app";
-import type { AgentGroup, AgentView, FileNode, FileScope, ModelOption, ProjectDetail, ProjectIcon, ProjectColor, ProjectSummary, Snapshot, TranscriptItem } from "../shared/types.ts";
+import type { AgentGroup, AgentView, FileNode, FileScope, ModelOption, ProjectDetail, ProjectIcon, ProjectColor, ProjectSummary, Snapshot } from "../shared/types.ts";
 import { PROJECT_COLORS, PROJECT_ICONS } from "../shared/types.ts";
 import { icon } from "./icons.ts";
 import { escapeHtml, inline, markdown } from "./markdown.ts";
@@ -17,7 +17,7 @@ interface FilePage {
   tooLarge?: boolean;
 }
 
-type Page = { kind: "project" } | { kind: "agent"; id: string } | FilePage | { kind: "settings" } | { kind: "pick" };
+type Page = { kind: "project" } | FilePage | { kind: "settings" } | { kind: "pick" };
 
 interface Host {
   call(name: string, args?: Record<string, unknown>): Promise<Record<string, any>>;
@@ -43,7 +43,6 @@ interface Draft {
 interface SettingsDraft extends Draft {
   name: string;
   instructions: string;
-  prFollowUp: boolean;
 }
 
 interface CreateDraft extends Draft {
@@ -60,13 +59,10 @@ interface State {
   settings?: SettingsDraft;
   dropdown?: DropdownKey;
   options?: { models: ModelOption[]; workspaces: string[] };
-  transcript?: { agentId: string; items: TranscriptItem[] };
   filter: string;
   selected: boolean;
   expandedDirs: Set<string>;
   collapsed: Set<string>;
-  steer: boolean;
-  drafts: Record<string, string>;
   openDetails: Set<string>;
   toast?: { text: string; kind: "ok" | "error" };
   pending: boolean;
@@ -97,8 +93,6 @@ const state: State = {
   selected: true,
   expandedDirs: new Set(["root:project", "root:user"]),
   collapsed: new Set(["resolved"]),
-  steer: false,
-  drafts: {},
   openDetails: new Set(),
   pending: false,
   listWidth: storedListWidth(),
@@ -199,10 +193,12 @@ async function run(task: () => Promise<void>, success?: string): Promise<void> {
 }
 
 function statusLine(agent: AgentView): string {
-  if (agent.group === "needs_you") return agent.error ?? agent.report?.needsYou ?? agent.activity ?? "Needs your input";
+  if (agent.group === "needs_you") return agent.report?.needsYou ?? "Needs your input";
+  if (agent.status === "prepared") return agent.group === "working" ? "Starting" : "Not started";
   if (agent.group === "working") return agent.activity ?? "Working";
+  if (agent.status === "stopped") return "Interrupted";
   if (agent.report?.summary) return agent.report.summary;
-  return agent.lastMessage?.split("\n")[0] ?? agent.task.split("\n")[0];
+  return agent.task.split("\n")[0];
 }
 
 function prBadge(agent: AgentView): string {
@@ -218,7 +214,7 @@ function prBadge(agent: AgentView): string {
 }
 
 function agentRow(agent: AgentView): string {
-  return `<button class="row agent-row g-${agent.group}" data-action="open-agent" data-id="${agent.id}">
+  return `<button class="row agent-row g-${agent.group}" data-action="open-agent" data-id="${agent.id}" title="${agent.threadId ? "Open this agent's chat" : "Not started yet"}">
     <span class="status-dot"></span>
     <span class="row-main"><span class="row-title"><span class="t">${escapeHtml(agent.title)}</span>${prBadge(agent)}</span><span class="row-sub">${escapeHtml(statusLine(agent))}</span></span>
     <span class="age">${ago(agent.updatedAt)}</span>
@@ -328,47 +324,7 @@ function subHeader(title: string, extra = ""): string {
   return `<div class="subhead"><button class="icon-btn" data-action="back" title="Back">${icon("chevronLeft", 15)}</button><span class="subhead-title">${title}</span>${extra}</div>`;
 }
 
-function agentPage(agent: AgentView): string {
-  const detail = current()!;
-  const report = agent.report;
-  const meta = [
-    `<span>${icon("terminal", 12)}Codex${agent.model ? ` · ${escapeHtml(agent.model)}` : ""}</span>`,
-    agent.branch ? `<span>${icon("branch", 12)}${escapeHtml(agent.branch)}</span>` : "",
-    `<span title="${escapeHtml(agent.cwd)}">${icon("folder", 12)}${escapeHtml(base(agent.cwd))}</span>`,
-    agent.usage ? `<span>${Math.round((agent.usage.inputTokens + agent.usage.outputTokens) / 1000)}k tokens</span>` : "",
-  ].join("");
-  const needs = agent.group === "needs_you" ? `<div class="callout">${icon("inbox", 14)}<div>${escapeHtml(agent.error ?? report?.needsYou ?? agent.activity ?? "This agent needs your input.")}</div></div>` : "";
-  const working = agent.group === "working" ? `<div class="activity"><span class="spinner"></span>${escapeHtml(agent.activity ?? "Working")}</div>` : "";
-  const next = report?.next.length
-    ? `<section class="block"><div class="label">Next</div><div class="rows">${report.next.map((line, index) => `<button class="row next-row" data-action="send-next" data-index="${index}"><span class="kbd">${index + 1}</span><span class="row-main">${inline(line)}</span>${icon("send", 13, "send-icon")}</button>`).join("")}</div></section>`
-    : "";
-  const body = report ? markdown(report.text) : agent.lastMessage ? markdown(agent.lastMessage) : `<span class="muted">No report yet.</span>`;
-  const transcript =
-    state.transcript?.agentId === agent.id
-      ? `<section class="block"><div class="label">Transcript</div><div class="transcript">${state.transcript.items.map((item) => `<div class="t-item t-${item.role}"><span class="t-role">${item.role}</span><div class="md">${item.role === "tool" ? `<code>${escapeHtml(item.text)}</code>` : markdown(item.text.length > 4000 ? `${item.text.slice(0, 4000)}…` : item.text)}</div></div>`).join("") || `<div class="muted">Empty.</div>`}</div></section>`
-      : "";
-  const actions = [
-    agent.sessionId ? `<button class="btn small" data-action="open-thread" data-thread="${agent.sessionId}">${icon("external", 12)}Open chat</button>` : "",
-    agent.group === "working" ? `<button class="btn small" data-action="agent" data-op="stop">${icon("stop", 12)}Stop</button>` : "",
-    agent.group === "review" ? `<button class="btn small" data-action="agent" data-op="review">${icon("check", 12)}Mark reviewed</button>` : "",
-    `<button class="btn small ghost" data-action="transcript">${state.transcript?.agentId === agent.id ? "Hide transcript" : "Transcript"}</button>`,
-    agent.resolved ? `<button class="btn small ghost" data-action="agent" data-op="reopen">Reopen</button>` : `<button class="btn small ghost" data-action="agent" data-op="resolve">${icon("archive", 12)}Resolve</button>`,
-  ].join("");
-  return `${subHeader(escapeHtml(detail.project.name))}
-    <div class="agent-head"><div class="dt-row"><span class="status-dot g-${agent.group}"></span><h3>${escapeHtml(agent.title)}</h3></div><div class="dt-sub">${escapeHtml(GROUPS.find((g) => g.id === agent.group)!.label)} · started ${ago(agent.createdAt)} ago</div></div>
-    <div class="meta">${meta}</div>
-    ${needs}${working}
-    ${report?.pr ? `<div class="pr-line"><button class="pr-link" data-action="link" data-url="${escapeHtml(report.pr)}">${icon("pr", 14)}${escapeHtml(report.pr.replace("https://github.com/", ""))}</button>${prBadge(agent)}</div>` : ""}
-    <div class="md report">${body}</div>
-    ${next}
-    <div class="actions">${actions}</div>
-    ${transcript}
-    <details class="task" data-key="task-${agent.id}" ${state.openDetails.has(`task-${agent.id}`) ? "open" : ""}><summary>Task</summary><div class="md">${markdown(agent.task)}</div></details>
-    ${agent.resolved ? "" : `<form class="composer" data-form="reply">
-      <textarea name="text" rows="2" data-draft="${agent.id}" placeholder="${agent.group === "working" ? "Send follow-up" : `Reply to ${escapeHtml(agent.title)}`}">${escapeHtml(state.drafts[agent.id] ?? "")}</textarea>
-      <div class="composer-bar">${agent.group === "working" ? `<label class="toggle"><input type="checkbox" name="steer" ${state.steer ? "checked" : ""}>Steer now</label>` : `<span></span>`}<button class="send" type="submit" title="Send">${icon("arrowUp", 14)}</button></div>
-    </form>`}`;
-}
+
 
 function fileCrumbs(page: FilePage): string {
   const parts = page.path.split("/").filter(Boolean);
@@ -416,7 +372,6 @@ function settingsPage(): string {
       ${fieldRow("Model", modelField(draft))}
     </div>
     <label class="field"><span>Instructions</span><textarea data-bind="settings-instructions" rows="8" maxlength="16000" placeholder="What every agent should know: conventions, which folder is which, rules no task can break.">${escapeHtml(draft.instructions)}</textarea><span class="hint">Sent to every agent, like an AGENTS.md for the whole project.</span></label>
-    <label class="check"><input type="checkbox" name="prFollowUp" ${draft.prFollowUp ? "checked" : ""}><span><strong>Follow up on pull requests</strong><em>Send failing checks and requested changes back to the agent that opened the PR.</em></span></label>
     <div class="form-actions"><button class="btn primary" type="submit">Save</button><button class="btn ghost" type="button" data-action="archive">${icon("archive", 13)}Archive coordinator</button></div>
   </form>`;
 }
@@ -510,10 +465,7 @@ function panelView(): string {
   }
   const page = state.page;
   let body = "";
-  if (page.kind === "agent") {
-    const agent = agentById(page.id);
-    body = agent ? agentPage(agent) : projectPage(detail);
-  } else if (page.kind === "file") body = filePage(page);
+  if (page.kind === "file") body = filePage(page);
   else if (page.kind === "settings") body = settingsPage();
   else body = projectPage(detail);
   const head =
@@ -569,10 +521,7 @@ function homeView(): string {
   } else {
     const page = state.page;
     let body = "";
-    if (page.kind === "agent") {
-      const agent = agentById(page.id);
-      body = agent ? agentPage(agent) : projectPage(detail);
-    } else if (page.kind === "file") body = filePage(page);
+    if (page.kind === "file") body = filePage(page);
     else if (page.kind === "settings" && state.settings) body = settingsPage();
     else body = projectPage(detail);
     const chat = detail.project.coordinatorThreadId
@@ -587,7 +536,7 @@ function homeView(): string {
   return `<div class="home" style="--plist-w:${state.listWidth}px">${list}<main class="pdetail">${main}</main></div>`;
 }
 
-const SCROLLERS = [".panel-body", ".pdetail-body", ".plist-rows", ".transcript", ".source"];
+const SCROLLERS = [".panel-body", ".pdetail-body", ".plist-rows", ".source"];
 
 function render(): void {
   if (root.querySelector(".home.resizing")) return;
@@ -651,7 +600,6 @@ function openSettings(detail: ProjectDetail): void {
     picker: false,
     name: project.name,
     instructions: detail.instructions.trim(),
-    prFollowUp: project.prFollowUp !== false,
   };
   state.page = { kind: "settings" };
   state.dropdown = undefined;
@@ -711,6 +659,24 @@ async function openCoordinator(slug: string): Promise<void> {
   if (info.threadId && (await host.openLink(`codex://threads/${info.threadId}`))) return;
   if (info.newThreadUrl && (await host.openLink(info.newThreadUrl))) return;
   if (!(await host.message(info.kickoff, "new"))) toast("Could not open the chat. Type $coordinator in a new chat instead.", "error");
+}
+
+async function openAgent(id: string): Promise<void> {
+  const detail = current();
+  const agent = agentById(id);
+  if (!detail || !agent) return;
+  if (!agent.threadId) {
+    toast(agent.status === "prepared" ? `${agent.title} has not started yet.` : `No chat for ${agent.title} yet.`);
+    return;
+  }
+  if (!(await host.openLink(`codex://threads/${agent.threadId}`))) {
+    toast("Could not open the agent's chat.", "error");
+    return;
+  }
+  if (agent.group !== "review") return;
+  const result = await host.call("ui_agent", { project: detail.project.slug, agent: agent.id, action: "review" });
+  state.snapshot = result.snapshot as Snapshot;
+  render();
 }
 
 async function onAction(target: HTMLElement): Promise<void> {
@@ -776,7 +742,6 @@ async function onAction(target: HTMLElement): Promise<void> {
     case "back":
       if (state.page.kind === "file" && isDirty(state.page) && !confirm("Discard unsaved changes?")) return;
       state.page = { kind: "project" };
-      state.transcript = undefined;
       state.settings = undefined;
       state.dropdown = undefined;
       return render();
@@ -793,10 +758,7 @@ async function onAction(target: HTMLElement): Promise<void> {
       return render();
     }
     case "open-agent":
-      state.page = { kind: "agent", id: target.dataset.id! };
-      state.transcript = undefined;
-      state.steer = false;
-      return render();
+      return openAgent(target.dataset.id!);
     case "open-file": {
       if (!detail) return;
       const scope = (target.dataset.scope as FileScope) ?? "project";
@@ -823,38 +785,6 @@ async function onAction(target: HTMLElement): Promise<void> {
     case "link":
       await host.openLink(target.dataset.url!);
       return;
-    case "transcript": {
-      const agent = state.page.kind === "agent" ? agentById(state.page.id) : undefined;
-      if (!detail || !agent) return;
-      if (state.transcript?.agentId === agent.id) {
-        state.transcript = undefined;
-        return render();
-      }
-      return run(async () => {
-        const result = await host.call("ui_transcript", { project: detail.project.slug, agent: agent.id });
-        state.transcript = { agentId: agent.id, items: result.items ?? [] };
-      });
-    }
-    case "send-next": {
-      const agent = state.page.kind === "agent" ? agentById(state.page.id) : undefined;
-      const line = agent?.report?.next[Number(target.dataset.index)];
-      if (!detail || !agent || !line) return;
-      return run(async () => {
-        const result = await host.call("ui_agent", { project: detail.project.slug, agent: agent.id, action: "send", text: line });
-        state.snapshot = result.snapshot;
-      }, `Sent to ${agent.title}`);
-    }
-    case "agent": {
-      const agent = state.page.kind === "agent" ? agentById(state.page.id) : undefined;
-      const op = target.dataset.op!;
-      if (!detail || !agent) return;
-      if (op === "resolve" && !confirm(`Resolve "${agent.title}"? Its branch and files stay.`)) return;
-      return run(async () => {
-        const result = await host.call("ui_agent", { project: detail.project.slug, agent: agent.id, action: op });
-        state.snapshot = result.snapshot;
-        if (op === "resolve") state.page = { kind: "project" };
-      });
-    }
     case "archive":
       if (!detail || !confirm(`Archive ${detail.project.name}? Its files stay on disk.`)) return;
       return run(async () => {
@@ -907,23 +837,13 @@ async function onSubmit(form: HTMLFormElement): Promise<void> {
         model: draft.model,
         effort: draft.effort,
         instructions: draft.instructions,
-        prFollowUp: draft.prFollowUp,
       });
       state.snapshot = result.snapshot;
       state.settings = undefined;
       state.page = { kind: "project" };
     }, "Saved");
   }
-  if (form.dataset.form === "reply" && detail && state.page.kind === "agent") {
-    const agent = agentById(state.page.id);
-    const text = data.text?.trim();
-    if (!agent || !text) return;
-    return run(async () => {
-      const result = await host.call("ui_agent", { project: detail.project.slug, agent: agent.id, action: "send", text, mode: data.steer ? "steer" : "queue" });
-      state.snapshot = result.snapshot;
-      delete state.drafts[agent.id];
-    }, "Sent");
-  }
+
 }
 
 root.addEventListener("click", (event) => {
@@ -936,9 +856,7 @@ root.addEventListener("click", (event) => {
   const agentLink = element.closest<HTMLAnchorElement>("a[data-agent]");
   if (agentLink) {
     event.preventDefault();
-    state.page = { kind: "agent", id: agentLink.dataset.agent! };
-    state.transcript = undefined;
-    render();
+    void openAgent(agentLink.dataset.agent!);
     return;
   }
   const anchor = element.closest<HTMLAnchorElement>("a[data-link], a[data-file]");
@@ -996,7 +914,6 @@ root.addEventListener("submit", (event) => {
 
 root.addEventListener("input", (event) => {
   const field = event.target as HTMLInputElement;
-  if (field.dataset.draft) state.drafts[field.dataset.draft] = field.value;
   const bind = field.dataset.bind;
   if (bind === "filter") {
     state.filter = field.value;
@@ -1024,8 +941,6 @@ root.addEventListener("input", (event) => {
 
 root.addEventListener("change", (event) => {
   const input = event.target as HTMLInputElement;
-  if (input.name === "steer") state.steer = input.checked;
-  if (input.name === "prFollowUp" && state.settings) state.settings.prFollowUp = input.checked;
 });
 
 root.addEventListener("toggle", (event) => {

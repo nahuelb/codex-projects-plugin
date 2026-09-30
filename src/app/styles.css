@@ -220,33 +220,7 @@ body:not(.fullscreen) .panel { min-height: 0; }
 .subhead { display: flex; align-items: center; gap: 6px; padding: 14px 0 10px; }
 .subhead-title { font-size: var(--text-sm); color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.agent-head { padding: 0 2px 10px; }
-.dt-row { display: flex; align-items: center; gap: 8px; }
-.dt-row h3 { font-size: 16px; }
-.dt-sub { color: var(--fg-3); font-size: var(--text-xs); margin-top: 3px; }
-.meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
-.meta span { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; height: 24px; padding: 0 8px; border-radius: var(--r-md); background: var(--fill-2); color: var(--fg-2); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.callout { display: flex; gap: 10px; background: var(--warning-soft); border-radius: var(--r-lg); padding: 10px 12px; margin-bottom: 12px; }
-.callout .icon { color: var(--warning); margin-top: 2px; }
-.activity { display: flex; align-items: center; gap: 8px; color: var(--fg-2); margin-bottom: 12px; }
-.pr-line { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.pr-link { display: inline-flex; align-items: center; gap: 6px; color: var(--info); font-weight: var(--w-medium); }
-.report { background: var(--fill-1); border: 1px solid var(--border-light); border-radius: var(--r-xl); padding: 12px 14px; margin-bottom: 14px; max-height: 460px; overflow: auto; }
-.next-row .send-icon { color: var(--fg-3); opacity: 0; }
-.next-row:hover .send-icon { opacity: 1; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
-.task { margin-bottom: 14px; }
-.task summary { cursor: pointer; color: var(--fg-2); font-size: var(--text-sm); }
-.transcript { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow: auto; }
-.t-item { border-left: 2px solid var(--border-heavy); padding-left: 10px; }
-.t-user { border-left-color: var(--info); }
-.t-role { font-size: 11px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.04em; }
-.composer { background: var(--bg); border: 1px solid var(--border); border-radius: 18px; padding: 10px 10px 8px 14px; corner-shape: superellipse(1.5); }
-.composer textarea { width: 100%; border: 0; outline: none; background: none; resize: none; padding: 0; min-height: 40px; }
-.composer textarea::placeholder { color: var(--fg-3); }
-.composer-bar { display: flex; align-items: center; justify-content: space-between; }
-.toggle { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--fg-2); }
-.send { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--fg); color: var(--bg); }
 
 .form { display: flex; flex-direction: column; gap: 16px; padding: 4px 2px 16px; }
 .identity { display: flex; align-items: center; gap: 12px; }

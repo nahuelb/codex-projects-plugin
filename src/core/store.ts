@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
@@ -35,7 +37,8 @@ import {
   writeTextAtomic,
 } from "./fsutil.ts";
 import { parseFrontmatter, parseNotes, renderFrontmatter } from "./markdown.ts";
-import { PROJECT_SUBDIRS, checkSlug, legacyRootDir, paths, pluginDataDir } from "./paths.ts";
+import { isThreadId } from "./rollout.ts";
+import { PLUGIN_NAME, PROJECT_SUBDIRS, checkSlug, legacyRootDir, paths, pluginDataDir } from "./paths.ts";
 
 export const MEMORY_TYPES = ["user", "feedback", "project", "reference"] as const;
 export const MEMORY_INDEX_MAX_LINES = 200;
@@ -53,7 +56,6 @@ export interface NewProjectInput {
   model?: string;
   effort?: string;
   instructions?: string;
-  prFollowUp?: boolean;
 }
 
 export type ProjectPatch = Partial<Omit<NewProjectInput, "instructions">> & { archived?: boolean; instructions?: string; coordinatorThreadId?: string };
@@ -81,7 +83,7 @@ export async function migrateLegacyRoot(legacy = legacyRootDir(), target = plugi
     for (const file of await readdir(dir).catch(() => [] as string[])) {
       if (!file.endsWith(".json")) continue;
       const agent = await readJson<AgentRecord>(path.join(dir, file)).catch(() => undefined);
-      if (agent && !agent.resolved && (agent.status === "working" || agent.status === "starting")) return false;
+      if (agent && !agent.resolved && ((agent.status as string) === "working" || (agent.status as string) === "starting")) return false;
     }
   }
   const pid = Number((await readText(path.join(legacy, "run", "coordd.pid"))).trim());
@@ -101,8 +103,31 @@ export async function migrateLegacyRoot(legacy = legacyRootDir(), target = plugi
     if (code === "ENOENT" || code === "EEXIST" || code === "ENOTEMPTY" || code === "EXDEV") return false;
     throw error;
   }
-  for (const stale of ["coordd.sock", "coordd.pid", "coordd.lock"]) await rm(path.join(target, "run", stale), { force: true });
+  for (const stale of LEGACY_RUN_FILES) await rm(path.join(target, "run", stale), { force: true });
   return true;
+}
+
+const runCommand = promisify(execFile);
+
+const LEGACY_RUN_FILES = ["coordd.sock", "coordd.pid", "coordd.lock"];
+
+export async function stopLegacyService(root = paths.root()): Promise<boolean> {
+  const pidFile = path.join(root, "run", "coordd.pid");
+  if (!(await exists(pidFile))) return false;
+  const pid = Number((await readText(pidFile)).trim());
+  let stopped = false;
+  if (processAlive(pid)) {
+    const command = await runCommand("ps", ["-p", String(pid), "-o", "command="]).then((result) => result.stdout, () => "");
+    const cwd = await runCommand("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"]).then((result) => result.stdout, () => "");
+    if (command.includes("daemon.js") && (command.includes(PLUGIN_NAME) || cwd.includes(PLUGIN_NAME))) {
+      try {
+        process.kill(pid, "SIGTERM");
+        stopped = true;
+      } catch {}
+    }
+  }
+  for (const stale of LEGACY_RUN_FILES) await rm(path.join(root, "run", stale), { force: true });
+  return stopped;
 }
 
 export async function ensureRoot(): Promise<void> {
@@ -145,6 +170,7 @@ async function readProjectRecord(slug: string): Promise<ProjectRecord | undefine
     icon: pickIcon(record.icon, "layers"),
     color: pickColor(record.color, "gray"),
     repos: Array.isArray(record.repos) ? record.repos.filter((repo) => typeof repo === "string") : [],
+    pastThreadIds: Array.isArray(record.pastThreadIds) ? record.pastThreadIds.filter(isThreadId).slice(-20) : undefined,
   };
 }
 
@@ -183,7 +209,6 @@ export async function createProject(input: NewProjectInput): Promise<ProjectReco
     repos,
     model: input.model?.trim() || undefined,
     effort: input.effort?.trim() || undefined,
-    prFollowUp: input.prFollowUp ?? true,
     createdAt: now,
     updatedAt: now,
   };
@@ -229,7 +254,10 @@ async function applyProjectPatch(slug: string, patch: ProjectPatch): Promise<Pro
     model: patch.model !== undefined ? patch.model.trim() || undefined : current.model,
     effort: patch.effort !== undefined ? patch.effort.trim() || undefined : current.effort,
     coordinatorThreadId: patch.coordinatorThreadId ?? current.coordinatorThreadId,
-    prFollowUp: patch.prFollowUp ?? current.prFollowUp ?? true,
+    pastThreadIds:
+      patch.coordinatorThreadId && current.coordinatorThreadId && patch.coordinatorThreadId !== current.coordinatorThreadId
+        ? [...(current.pastThreadIds ?? []).filter((id) => id !== current.coordinatorThreadId), current.coordinatorThreadId].slice(-20)
+        : current.pastThreadIds,
     archived: patch.archived ?? current.archived,
     updatedAt: nowIso(),
   };
@@ -360,12 +388,14 @@ export async function nextAgentId(slug: string): Promise<string> {
   throw new Error("No free agent id.");
 }
 
-export function agentGroup(agent: AgentRecord): AgentGroup {
+export const PREPARE_GRACE_MS = 15 * 60_000;
+
+export function agentGroup(agent: AgentRecord, now = Date.now()): AgentGroup {
   if (agent.resolved) return "resolved";
-  if (agent.status === "failed" || agent.status === "waiting") return "needs_you";
-  if (agent.status === "starting" || agent.status === "working") return "working";
-  if (agent.report?.needsYou) return "needs_you";
-  if (agent.status === "idle" && agent.report && !agent.reviewed) return "review";
+  if (agent.status === "waiting" || agent.report?.needsYou) return agent.status === "working" ? "working" : "needs_you";
+  if (agent.status === "working") return "working";
+  if (agent.status === "prepared") return now - Date.parse(agent.createdAt) < PREPARE_GRACE_MS ? "working" : "idle";
+  if (agent.report && !agent.reviewed) return "review";
   return "idle";
 }
 

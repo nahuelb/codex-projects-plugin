@@ -26,6 +26,5 @@ await writeFile("dist/app.html", html);
 
 const node = { bundle: true, platform: "node", format: "esm", target: "node22", define, logLevel: "warning", banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" } };
 await build({ ...node, entryPoints: ["src/server/index.ts"], outfile: "dist/server.js" });
-await build({ ...node, entryPoints: ["src/daemon/index.ts"], outfile: "dist/daemon.js" });
 
-console.log(`built ${version}: dist/app.html (${Math.round(html.length / 1024)} KB), dist/server.js, dist/daemon.js`);
+console.log(`built ${version}: dist/app.html (${Math.round(html.length / 1024)} KB), dist/server.js`);

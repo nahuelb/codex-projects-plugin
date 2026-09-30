@@ -11,7 +11,7 @@ const { parseNotes, parseReport, parseFrontmatter } = await import("../src/core/
 const store = await import("../src/core/store.ts");
 const { paths } = await import("../src/core/paths.ts");
 const { contextDigest } = await import("../src/core/digest.ts");
-const { createWorktree } = await import("../src/core/git.ts");
+const { createTaskWorktree, removeTaskWorktree } = await import("../src/core/git.ts");
 
 test("parseReport reads PR, sections, Next and Remember lines", () => {
   const report = parseReport(
@@ -79,20 +79,34 @@ test("projects, memory, notes, and inbox round-trip on disk", async () => {
 test("agentGroup follows the Needs you / Review / Working / Idle rules", () => {
   const base = { status: "idle", resolved: false, reviewed: false } as any;
   assert.equal(store.agentGroup({ ...base, status: "working" }), "working");
-  assert.equal(store.agentGroup({ ...base, status: "failed" }), "needs_you");
+  assert.equal(store.agentGroup({ ...base, status: "waiting" }), "needs_you");
+  assert.equal(store.agentGroup({ ...base, status: "stopped" }), "idle");
   assert.equal(store.agentGroup({ ...base, report: { needsYou: "Which DB?" } }), "needs_you");
   assert.equal(store.agentGroup({ ...base, report: { needsYou: "" } }), "review");
   assert.equal(store.agentGroup({ ...base, report: { needsYou: "" }, reviewed: true }), "idle");
-  assert.equal(store.agentGroup({ ...base, resolved: true, status: "failed" }), "resolved");
+  assert.equal(store.agentGroup({ ...base, resolved: true, status: "waiting" }), "resolved");
 });
 
-test("createWorktree makes a branch and folder per agent", async () => {
+test("task worktrees live inside the repository and stay out of git status", async () => {
+  const { writeFile: write } = await import("node:fs/promises");
   const repo = await mkdtemp(path.join(os.tmpdir(), "pc-repo-"));
-  execFileSync("git", ["-C", repo, "init", "-q", "-b", "main"]);
-  execFileSync("git", ["-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"]);
-  const worktree = await createWorktree(repo, "demo", "a-001", "Cache the users endpoint");
-  assert.equal(worktree.branch, "project/demo/a-001-cache-the-users-endpoint");
-  assert.equal(execFileSync("git", ["-C", worktree.cwd, "branch", "--show-current"]).toString().trim(), worktree.branch);
+  const gitIn = (cwd: string, ...args: string[]) => execFileSync("git", ["-C", cwd, "-c", "user.email=t@t", "-c", "user.name=t", ...args]).toString().trim();
+  gitIn(repo, "init", "-q", "-b", "main");
+  await write(path.join(repo, ".gitignore"), ".env\n");
+  await write(path.join(repo, ".worktreeinclude"), ".env\n");
+  await write(path.join(repo, ".env"), "SECRET=1\n");
+  gitIn(repo, "add", ".gitignore", ".worktreeinclude");
+  gitIn(repo, "commit", "-q", "-m", "init");
+  const worktree = await createTaskWorktree(repo, "a-001", "Cache the users endpoint");
+  const root = gitIn(repo, "rev-parse", "--show-toplevel");
+  assert.equal(worktree.branch, "coordinator/a-001-cache-the-users-endpoint");
+  assert.equal(worktree.cwd, path.join(root, ".worktrees", "a-001-cache-the-users-endpoint"));
+  assert.equal(gitIn(worktree.cwd, "branch", "--show-current"), worktree.branch);
+  assert.equal(await readFile(path.join(worktree.cwd, ".env"), "utf8"), "SECRET=1\n");
+  assert.equal(gitIn(repo, "status", "--porcelain"), "");
+  assert.match(await readFile(path.join(root, ".git", "info", "exclude"), "utf8"), /^\/\.worktrees\/$/m);
+  assert.equal(await removeTaskWorktree(repo, worktree.cwd, worktree.branch, worktree.base), "worktree and its empty branch removed");
+  assert.equal(gitIn(repo, "branch", "--list", worktree.branch), "");
 });
 
 test("the file tree hides blank files and empty folders", async () => {

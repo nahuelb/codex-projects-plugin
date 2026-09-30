@@ -1,8 +1,6 @@
-export type Harness = "codex";
+export type Isolation = "worktree" | "shared";
 
-export type Isolation = "worktree" | "checkout" | "folder";
-
-export type AgentStatus = "starting" | "working" | "idle" | "waiting" | "failed" | "stopped";
+export type AgentStatus = "prepared" | "working" | "idle" | "waiting" | "stopped";
 
 export type AgentGroup = "needs_you" | "review" | "working" | "idle" | "resolved";
 
@@ -24,7 +22,7 @@ export interface ProjectRecord {
   model?: string;
   effort?: string;
   coordinatorThreadId?: string;
-  prFollowUp?: boolean;
+  pastThreadIds?: string[];
   createdAt: string;
   updatedAt: string;
   archived?: boolean;
@@ -49,48 +47,30 @@ export interface AgentReport {
   pr?: string;
 }
 
-export interface AgentUsage {
-  inputTokens: number;
-  outputTokens: number;
-  costUsd?: number;
-}
-
-export interface AgentFollowUp {
-  at: string;
-  text: string;
-  from: "coordinator" | "user";
-}
-
 export interface AgentRecord {
   id: string;
   slug: string;
   title: string;
   task: string;
-  harness: Harness;
-  model?: string;
-  effort?: string;
+  taskName: string;
   isolation: Isolation;
   repo?: string;
   cwd: string;
   branch?: string;
-  writableRoots?: string[];
+  baseSha?: string;
+  model?: string;
+  effort?: string;
+  threadId?: string;
+  nickname?: string;
   status: AgentStatus;
-  sessionId?: string;
-  turnId?: string;
   createdAt: string;
   updatedAt: string;
+  startedAt?: string;
   finishedAt?: string;
   activity?: string;
-  lastMessage?: string;
   report?: AgentReport;
   reviewed: boolean;
   resolved: boolean;
-  error?: string;
-  turns: number;
-  usage?: AgentUsage;
-  followUps: AgentFollowUp[];
-  queued?: string[];
-  deferred?: string[];
   pr?: PullRequestStatus;
 }
 
@@ -184,16 +164,9 @@ export interface ModelOption {
 export interface Snapshot {
   version: string;
   root: string;
-  service: { running: boolean; pid?: number; error?: string };
   codex: boolean;
   projects: ProjectSummary[];
   current?: ProjectDetail;
   threadId?: string;
   threadProject?: string;
-}
-
-export interface TranscriptItem {
-  role: "user" | "assistant" | "tool";
-  text: string;
-  at?: string;
 }

@@ -25,7 +25,8 @@ process.env.PROJECTS_COORDINATOR_HOME = dataDir;
 const store = await import("../src/core/store.ts");
 const { paths } = await import("../src/core/paths.ts");
 const { writeJsonAtomic } = await import("../src/core/fsutil.ts");
-const { createWorktree } = await import("../src/core/git.ts");
+const { createTaskWorktree, WORKTREE_DIR } = await import("../src/core/git.ts");
+const { taskNameFor } = await import("../src/core/board.ts");
 type AgentRecord = import("../src/shared/types.ts").AgentRecord;
 type PullRequestStatus = import("../src/shared/types.ts").PullRequestStatus;
 
@@ -86,11 +87,11 @@ async function project(input: Parameters<typeof store.createProject>[0]) {
   return threadId ? store.updateProject(record.slug, { coordinatorThreadId: threadId }) : record;
 }
 
-async function worktree(repo: string, slug: string, id: string, title: string) {
-  const cwd = path.join(paths.worktreesDir(slug), `${id}-${path.basename(repo)}`);
-  if (existsSync(cwd)) return { cwd, branch: git(cwd, ["branch", "--show-current"]) };
-  const created = await createWorktree(repo, slug, id, title);
-  return { cwd: created.cwd, branch: created.branch };
+async function worktree(repo: string, id: string, title: string) {
+  const cwd = path.join(repo, WORKTREE_DIR, `${id}-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+$/, "").slice(0, 30).replace(/-+$/, "")}`);
+  if (existsSync(cwd)) return { cwd, branch: git(cwd, ["branch", "--show-current"]), base: git(repo, ["rev-parse", "HEAD"]) };
+  const created = await createTaskWorktree(repo, id, title);
+  return { cwd: created.cwd, branch: created.branch, base: created.base };
 }
 
 function pullRequest(url: string, state: Partial<PullRequestStatus>): PullRequestStatus {
@@ -98,20 +99,19 @@ function pullRequest(url: string, state: Partial<PullRequestStatus>): PullReques
 }
 
 async function agent(slug: string, input: Partial<AgentRecord> & Pick<AgentRecord, "id" | "title" | "task" | "status">, repo?: string): Promise<void> {
-  const place = repo ? await worktree(repo, slug, input.id, input.title) : undefined;
+  const place = repo ? await worktree(repo, input.id, input.title) : undefined;
   const record: AgentRecord = {
     slug,
-    harness: "codex",
-    isolation: repo ? "worktree" : "folder",
+    taskName: taskNameFor(input.id, input.title),
+    isolation: repo ? "worktree" : "shared",
     repo,
-    cwd: place?.cwd ?? paths.workDir(slug, input.id),
+    cwd: place?.cwd ?? paths.project(slug),
     branch: place?.branch,
+    baseSha: place?.base,
     createdAt: daysAgo(3),
     updatedAt: hoursAgo(2),
     reviewed: false,
     resolved: false,
-    turns: 1,
-    followUps: [],
     ...input,
   };
   await writeJsonAtomic(paths.agentJson(slug, record.id), record);
@@ -157,7 +157,7 @@ await agent(slug, {
   id: "a-001",
   title: "Map both repositories",
   task: "Read pantry-web and pantry-api. Summarise the stack, how to run and test each, and recommend the first launch tasks.",
-  isolation: "checkout",
+  isolation: "shared",
   repo: web,
   cwd: web,
   status: "idle",
@@ -167,7 +167,6 @@ await agent(slug, {
   report: report("Mapped pantry-web (Next.js 15, Vitest, Playwright) and pantry-api (Fastify, Postgres, Stripe). Recommended six launch tasks.", []),
   reviewed: true,
   resolved: true,
-  usage: { inputTokens: 212_000, outputTokens: 9_000 },
 });
 
 await agent(
@@ -180,7 +179,6 @@ await agent(
     createdAt: daysAgo(2),
     updatedAt: minutesAgo(18),
     finishedAt: minutesAgo(18),
-    turns: 3,
     report: report(
       "Family plans work end to end in Stripe test mode: create, add a member, remove a member, cancel.",
       ["Add the plan picker to pantry-web once proration is decided"],
@@ -190,7 +188,6 @@ await agent(
       },
     ),
     pr: pullRequest(pr("pantry-api", 214), { draft: true }),
-    usage: { inputTokens: 486_000, outputTokens: 31_000 },
   },
   api,
 );
@@ -205,14 +202,12 @@ await agent(
     createdAt: daysAgo(3),
     updatedAt: minutesAgo(42),
     finishedAt: minutesAgo(42),
-    turns: 4,
     report: report(
       "Shopping lists now sync live between family members. Edits apply optimistically and merge without conflicts. Added 14 tests.",
       ["Merge #318 after the API deploy on Wednesday", "Add a two-device Playwright test"],
       { pr: pr("pantry-web", 318) },
     ),
     pr: pullRequest(pr("pantry-web", 318), { review: "APPROVED" }),
-    usage: { inputTokens: 612_000, outputTokens: 44_000 },
   },
   web,
 );
@@ -227,8 +222,6 @@ await agent(
     createdAt: hoursAgo(5),
     updatedAt: minutesAgo(1),
     activity: "Running pnpm test",
-    turns: 2,
-    usage: { inputTokens: 184_000, outputTokens: 12_000 },
   },
   api,
 );
@@ -243,7 +236,6 @@ await agent(
     createdAt: hoursAgo(3),
     updatedAt: minutesAgo(2),
     activity: "Editing app/onboarding/steps.tsx",
-    usage: { inputTokens: 96_000, outputTokens: 7_000 },
   },
   web,
 );
@@ -258,11 +250,8 @@ await agent(
     createdAt: daysAgo(2),
     updatedAt: minutesAgo(4),
     activity: "Fixing the failing e2e (webkit) check",
-    turns: 3,
     report: report("Meal plans and lists work offline; edits queue in IndexedDB and replay on reconnect.", [], { pr: pr("pantry-web", 320) }),
     pr: pullRequest(pr("pantry-web", 320), { checks: "failing", failing: ["e2e (webkit)"] }),
-    followUps: [{ at: minutesAgo(9), from: "coordinator", text: "Checks are failing on your pull request: e2e (webkit). Find the cause, fix it, and push." }],
-    usage: { inputTokens: 402_000, outputTokens: 28_000 },
   },
   web,
 );
@@ -277,11 +266,9 @@ await agent(
     createdAt: daysAgo(4),
     updatedAt: daysAgo(1),
     finishedAt: daysAgo(1),
-    turns: 2,
     report: report("Fixed 23 contrast, focus, and label issues. Two need design input; they are listed in the plan.", [], { pr: pr("pantry-web", 309) }),
     pr: pullRequest(pr("pantry-web", 309), { state: "MERGED", review: "APPROVED" }),
     reviewed: true,
-    usage: { inputTokens: 338_000, outputTokens: 21_000 },
   },
   web,
 );
@@ -298,7 +285,6 @@ await agent(
     finishedAt: hoursAgo(1),
     report: report("The pricing page shows the Family tier, a comparison table, and five new FAQ entries.", ["Confirm the Family price ($9.99) with the user"], { pr: pr("pantry-web", 322) }),
     pr: pullRequest(pr("pantry-web", 322), { checks: "pending" }),
-    usage: { inputTokens: 74_000, outputTokens: 6_000 },
   },
   web,
 );
