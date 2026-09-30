@@ -8,6 +8,9 @@ const marker = ".codex-projects-plugin-install";
 const home = os.homedir();
 const marketplaceFile = path.join(home, ".agents", "plugins", "marketplace.json");
 const target = path.join(home, "plugins", name);
+const dataFlag = process.argv.indexOf("--data");
+const dataDir = dataFlag > 0 ? process.argv[dataFlag + 1] : undefined;
+if (dataFlag > 0 && !dataDir) throw new Error("--data needs a folder.");
 
 if (!existsSync("dist/server.js") || !existsSync("dist/app.html")) throw new Error("Run npm run build first.");
 
@@ -32,6 +35,12 @@ try {
   await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
   await writeFile(path.join(staging, "package.json"), `${JSON.stringify({ name, private: true, type: "module", engines: { node: ">=22" } }, null, 2)}\n`);
   await writeFile(path.join(staging, marker), `${manifest.version}\n`);
+  if (dataDir) {
+    const mcpFile = path.join(staging, ".mcp.json");
+    const mcp = JSON.parse(await readFile(mcpFile, "utf8"));
+    for (const server of Object.values(mcp.mcpServers)) server.env = { ...server.env, PROJECTS_COORDINATOR_HOME: path.resolve(dataDir) };
+    await writeFile(mcpFile, `${JSON.stringify(mcp, null, 2)}\n`);
+  }
   if (existsSync(target)) {
     backup = await mkdtemp(path.join(path.dirname(target), `.${name}-previous-`));
     await rename(target, path.join(backup, name));
@@ -60,4 +69,5 @@ await writeFile(marketplaceFile, `${JSON.stringify(marketplace, null, 2)}\n`);
 
 console.log(`Version ${version}.`);
 console.log(`Copied the plugin to ${target} and listed it in ${marketplaceFile}.`);
+if (dataDir) console.log(`This install reads and writes data in ${path.resolve(dataDir)}. Install again without --data to go back to your own data.`);
 console.log(`Next: codex plugin add ${name}@${marketplace.name ?? "personal"}   (then restart the Codex app)`);

@@ -230,10 +230,18 @@ function sectionHead(key: string, label: string, count?: number, extra = ""): st
   return `<button class="section-head" data-action="toggle-section" data-key="${key}">${icon(collapsed ? "chevronRight" : "chevronDown", 12, "chev")}<span>${label}</span>${count != null ? `<span class="count">${count}</span>` : ""}${extra}</button>`;
 }
 
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 function withAgentLinks(html: string, detail: ProjectDetail): string {
-  return html.replace(/\(?\b(a-\d{3})\b\)?/g, (match, id: string) => {
-    const agent = detail.agents.find((item) => item.id === id);
-    return agent ? `<a class="agent-link" data-agent="${id}">${icon("agent", 13)}<strong>${escapeHtml(agent.title)}</strong></a>` : match;
+  const titles = new Map(detail.agents.map((agent) => [agent.id, agent.title]));
+  const titlePattern = detail.agents.map((agent) => escapeRegExp(escapeHtml(agent.title))).join("|");
+  const trailingTitle = titlePattern ? `(?:\\s*(?::|—|-)?\\s*(${titlePattern}))?` : "()";
+  return html.replace(new RegExp(`\\((a-\\d{3,6})\\)|\\b(a-\\d{3,6})\\b${trailingTitle}`, "g"), (match, wrapped: string | undefined, bare: string | undefined, title: string | undefined) => {
+    const id = wrapped ?? bare ?? "";
+    const name = titles.get(id);
+    if (!name) return match;
+    const extra = title && title.toLowerCase() !== escapeHtml(name).toLowerCase() ? ` ${title}` : "";
+    return `<a class="agent-link" data-agent="${id}">${icon("agent", 13)}<strong>${escapeHtml(name)}</strong></a>${extra}`;
   });
 }
 

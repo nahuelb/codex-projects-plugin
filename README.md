@@ -2,6 +2,8 @@
 
 Project Coordinator is a Codex plugin inspired by Cursor Projects and Claude Code Projects. Each project gets a coordinator chat. It hands each task to a background Codex agent in its own git worktree, tracks what needs you, and keeps notes and memory that every agent reads.
 
+![The coordinator chat answers "what needs me today?" beside the Coordinator panel](docs/images/coordinator-thread.png)
+
 The prompts and code are original. See [docs/design.md](docs/design.md) for how each pattern maps here and what is not built yet.
 
 > **Status: experimental.** Tested on macOS with the Codex desktop app. It relies on Codex's MCP extensions and on `codex app-server` requests such as `thread/fork`, and on `codex://` deep links. These can change between Codex releases. It is not affiliated with OpenAI, Cursor, or Anthropic.
@@ -18,6 +20,8 @@ The prompts and code are original. See [docs/design.md](docs/design.md) for how 
 - **@-mention a project** in any chat to attach its current status.
 - **Pull request follow-up.** When an agent's PR gets failing checks or a review that requests changes, the agent is told to fix it. When it merges, the coordinator hears about it.
 - **Durable memory.** `MEMORY.md` is an index of typed memory files that every new agent receives. `preferences.md` holds cross-project preferences.
+
+![The Project Coordinator page: coordinators on the left, notes and agents grouped by what needs you on the right](docs/images/coordinator-page.png)
 
 ## Install (local)
 
@@ -36,6 +40,20 @@ Restart the Codex app, then open **Project Coordinator** in the sidebar and clic
 `install:local` copies the built plugin to `~/plugins/codex-projects-plugin` and lists it in `~/.agents/plugins/marketplace.json`.
 
 To update, pull and run `npm run install:local` again, then restart Codex. To remove it, run `codex plugin remove codex-projects-plugin@personal`. Your projects stay in `~/.codex/plugins/data/codex-projects-plugin-personal` until you delete that folder.
+
+## Try the demo
+
+The screenshots above use a demo project, Pantry 2.0 Launch, for a fictional meal-planning app. To explore it without touching your own data:
+
+```sh
+node scripts/demo.ts ~/pantry-demo
+npm run install:local -- --data ~/pantry-demo/data
+codex plugin add codex-projects-plugin@personal
+```
+
+Restart Codex and open **Project Coordinator**. The script creates two small git repositories, three coordinators, and agents in every state, with notes, memory, and plans. Run it again to reset the demo. Run `npm run install:local` without `--data` to go back to your own projects.
+
+The demo agents are records only. The background service marks agents that were working as stopped when it starts, so run the script again after the first launch to see them working.
 
 ## How it works
 
