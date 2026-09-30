@@ -24,6 +24,7 @@ interface Host {
   openLink(url: string): Promise<boolean>;
   message(text: string, target: "new" | "active"): Promise<boolean>;
   openFile(path: string): Promise<boolean>;
+  chatContext(text: string | null, title: string): Promise<boolean>;
   fullscreen(): Promise<boolean>;
 }
 
@@ -108,6 +109,23 @@ const GROUPS: { id: AgentGroup; label: string }[] = [
 ];
 
 const root = document.getElementById("root")!;
+let chatProject: string | null | undefined;
+
+function chatContextText(project: ProjectDetail["project"]): string {
+  return [
+    `This chat is the coordinator of the project "${project.name}" (slug: ${project.slug}).`,
+    `Use the $coordinator skill and call project_context with project "${project.slug}" before you answer.`,
+  ].join(" ");
+}
+
+function syncChatContext(): void {
+  if (state.mode !== "home" || !host) return;
+  const project = state.selected ? current()?.project : undefined;
+  const slug = project?.slug ?? null;
+  if (slug === chatProject) return;
+  chatProject = slug;
+  void host.chatContext(project ? chatContextText(project) : null, project ? `Project: ${project.name}` : "");
+}
 let host: Host;
 
 const current = (): ProjectDetail | undefined => state.snapshot?.current;
@@ -587,6 +605,7 @@ function render(): void {
     const element = root.querySelector(selector);
     if (element && scroll[index]) element.scrollTop = scroll[index];
   });
+  syncChatContext();
   const autofocus = root.querySelector<HTMLInputElement>("[autofocus]");
   if (autofocus && document.activeElement === document.body) autofocus.focus();
 }
@@ -1076,7 +1095,13 @@ function connectMcpHost(): Host {
   const app = new App({ name: "coordinator", version: "0.2.0" }, {}, { autoResize: true });
   const extensions = new OpenAIExtensions(app);
   app.ontoolresult = (result) => handleContent((result.structuredContent ?? {}) as Record<string, any>);
-  app.addEventListener("hostcontextchanged", (context) => applyContext({ ...app.getHostContext(), ...context }));
+  app.addEventListener("hostcontextchanged", (context) => {
+    applyContext({ ...app.getHostContext(), ...context });
+    if ((context as Record<string, unknown>)["openai/modelContext"] === null) {
+      chatProject = undefined;
+      syncChatContext();
+    }
+  });
   const connected = app.connect().then(() => {
     const context = app.getHostContext();
     const tool = context?.toolInfo?.tool?.name;
@@ -1120,6 +1145,16 @@ function connectMcpHost(): Host {
         return false;
       }
     },
+    async chatContext(text, title) {
+      await connected;
+      if (!app.getHostCapabilities()?.updateModelContext) return false;
+      try {
+        await app.updateModelContext({ content: text ? [{ type: "text", text, _meta: { "openai/title": title } }] : [] });
+        return true;
+      } catch {
+        return false;
+      }
+    },
     async fullscreen() {
       await connected;
       try {
@@ -1145,7 +1180,7 @@ function connectPreviewHost(): Host {
     return Promise.resolve(true);
   };
   void call(state.mode === "home" ? "coordinator_home" : "project_panel").then(handleContent);
-  return { call, openLink: (url) => note("open", url), message: (text, target) => note(`message (${target})`, text), openFile: async () => false, fullscreen: async () => false };
+  return { call, openLink: (url) => note("open", url), message: (text, target) => note(`message (${target})`, text), openFile: async () => false, chatContext: async () => false, fullscreen: async () => false };
 }
 
 host = window.parent !== window ? connectMcpHost() : connectPreviewHost();

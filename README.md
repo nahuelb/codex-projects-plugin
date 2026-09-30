@@ -7,7 +7,7 @@ The prompts and code are original. See [docs/design.md](docs/design.md) for how 
 ## What you get
 
 - **Create Project.** Pick an icon, a name, a workspace, and a model. Project Coordinator starts the project's coordinator chat for you.
-- **A Project Coordinator page in the Codex sidebar.** A project list like Code Review, each project's notes, agents, memory, and files, and the page's own chat as the coordinator. Coordinator chats are named after their project.
+- **A Project Coordinator page in the Codex sidebar.** A project list like Code Review, each project's notes, agents, memory, and files, and the page's own chat as the coordinator. The page attaches the selected project to that chat, so what you type there goes to that project's coordinator. Coordinator chats are named after their project.
 - **A Project panel beside the chat.** Notes, agents grouped by *Needs you*, *Ready for review*, *Working*, and *Idle*, memory, and all files, in one scrolling panel.
 - **Project files in Codex tabs.** All Files lists the project's plans, docs, notes, and memory. A file opens in a Codex file tab, where you can read and edit it and save with ⌘S. The coordinator writes plans and documents with `file_write` and links them in chat and in `notes.md`.
 - **A coordinator skill (`$coordinator`).** The coordinator reads a project digest each turn, starts agents, forwards follow-ups, and keeps `notes.md` and memory current.
