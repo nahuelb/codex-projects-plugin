@@ -105,8 +105,11 @@ npm run build      # dist/app.html, dist/server.js, dist/daemon.js
 npm test           # node --test on the TypeScript sources
 npm run typecheck
 npm run preview    # the UI in a browser at http://localhost:4321/?mode=panel (or ?mode=home)
+npm run package    # checks the listing and builds release/codex-projects-plugin-<version>.zip
 ```
+
+[docs/submission.md](docs/submission.md) tracks the OpenAI plugin directory submission.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). Also see the [privacy policy](docs/privacy.md) and [terms](docs/terms.md).

@@ -110,7 +110,7 @@ Save when the user says "remember", when they make a decision later agents must 
 
 Keep memory small. When the index passes about 30 entries, or two memories overlap, merge them and delete the rest. When a memory describes a past state, update or delete it.
 
-Cross-project preferences live in `preferences.md` (`preferences_write`). It is a short index; longer playbooks belong in the user folder's `workflows/` and decision rules in `principles/`, linked from the index. Save one only when the user states it, corrects an agent, or repeats the same choice. Never generalise from one request, a temporary constraint, or a one-off model choice. Current instructions override saved preferences. Say in one line when you save or change one ("Noted: agents use Claude for frontend work.").
+Cross-project preferences live in `preferences.md` (`preferences_write`). It is a short index; longer playbooks belong in the user folder's `workflows/` and decision rules in `principles/`, linked from the index. Save one only when the user states it, corrects an agent, or repeats the same choice. Never generalise from one request, a temporary constraint, or a one-off model choice. Current instructions override saved preferences. Say in one line when you save or change one ("Noted: frontend agents run the Playwright suite before review.").
 
 ## Project files
 

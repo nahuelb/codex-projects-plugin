@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { ResourceTemplate, type McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { AgentRecord, Snapshot, TranscriptItem } from "../shared/types.ts";
+import type { AgentRecord, ProjectRecord, Snapshot, TranscriptItem } from "../shared/types.ts";
 import { PROJECT_COLORS, PROJECT_ICONS } from "../shared/types.ts";
 import { createMentions } from "@openai/mcp-extensions/server";
 import { contextDigest } from "../core/digest.ts";
@@ -34,6 +34,8 @@ export const ICON = { src: "data:image/svg+xml," + encodeURIComponent(ICON_SVG),
 
 const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
 const writes = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
+const replaces = { readOnlyHint: false, destructiveHint: true, openWorldHint: false };
+const runsAgent = { readOnlyHint: false, destructiveHint: false, openWorldHint: true };
 const appOnly = { ui: { visibility: ["app"] } };
 
 const text = (value: string, structured?: Record<string, unknown>) => ({
@@ -41,10 +43,51 @@ const text = (value: string, structured?: Record<string, unknown>) => ({
   ...(structured ? { structuredContent: structured } : {}),
 });
 
+const viewText = (data: Snapshot) => [{ type: "text" as const, text: data.current ? `Showing project ${data.current.project.name}.` : "No projects yet." }];
+
 const view = (data: Snapshot, extra: Record<string, unknown> = {}) => ({
-  content: [{ type: "text" as const, text: data.current ? `Showing project ${data.current.project.name}.` : "No projects yet." }],
+  content: viewText(data),
+  structuredContent: { ...extra, project: data.current?.project.slug ?? null } as Record<string, unknown>,
+  _meta: { snapshot: data },
+});
+
+const appView = (data: Snapshot, extra: Record<string, unknown> = {}) => ({
+  content: viewText(data),
   structuredContent: { ...extra, snapshot: data } as Record<string, unknown>,
 });
+
+function publicProject(project: ProjectRecord) {
+  return {
+    slug: project.slug,
+    name: project.name,
+    goal: project.goal,
+    repos: project.repos,
+    icon: project.icon,
+    color: project.color,
+    model: project.model,
+    effort: project.effort,
+    prFollowUp: project.prFollowUp !== false,
+    archived: Boolean(project.archived),
+  };
+}
+
+function publicAgent(agent: AgentRecord) {
+  return {
+    id: agent.id,
+    title: agent.title,
+    status: agent.status,
+    resolved: agent.resolved,
+    isolation: agent.isolation,
+    repo: agent.repo,
+    cwd: agent.cwd,
+    branch: agent.branch,
+    model: agent.model,
+    activity: agent.activity,
+    error: agent.error,
+    report: agent.report ? { summary: agent.report.summary, next: agent.report.next, needsYou: agent.report.needsYou, pr: agent.report.pr } : undefined,
+    pullRequest: agent.pr ? { url: agent.pr.url, state: agent.pr.state, checks: agent.pr.checks, review: agent.pr.review } : undefined,
+  };
+}
 
 function describeAgent(agent: AgentRecord): string {
   const lines = [
@@ -82,8 +125,14 @@ const threadOf = (extra: any): string | undefined => {
 export const COORDINATOR_KICKOFF = (name: string, slug: string) =>
   `$coordinator Start the project "${name}" (${slug}). You are its coordinator.`;
 
+const MENTIONS_DESCRIPTION = "Find projects by name so the user can @-mention one in a chat and attach its current status.";
+
 function registerMentions(server: McpServer): void {
-  createMentions(server).setHandler(async ({ query }: { query: string }) => {
+  const described = {
+    registerTool: (name: string, config: Record<string, unknown>, callback: unknown) =>
+      (server.registerTool as any)(name, { ...config, title: "Mention a project", description: MENTIONS_DESCRIPTION, annotations: readOnly }, callback),
+  };
+  createMentions(described as unknown as McpServer).setHandler(async ({ query }: { query: string }) => {
     const needle = query.trim().toLowerCase();
     const projects = (await listProjects()).filter((project) => !needle || project.name.toLowerCase().includes(needle) || project.slug.includes(needle));
     return {
@@ -136,7 +185,7 @@ export function registerTools(server: McpServer, html: string): void {
     "project_new",
     {
       title: "New Coordinator",
-      description: "Open the Create Coordinator dialog.",
+      description: "Open the Create Coordinator dialog on the Project Coordinator page. It only shows the form; nothing is created until the user submits it.",
       inputSchema: z.object({}),
       annotations: readOnly,
       _meta: { ui: { resourceUri: UI_URI, visibility: ["app"] } },
@@ -161,9 +210,9 @@ export function registerTools(server: McpServer, html: string): void {
     "project_open",
     {
       title: "Show project",
-      description: "Show a project's status card in this conversation. Only when the user asks to see the project; the Project Coordinator page and the Coordinator panel already show it.",
+      description: "Show a project's status card in this conversation. Only when the user asks to see the project; the Project Coordinator page and the Coordinator panel already show it. If this conversation is not linked to a project yet, it becomes the project's coordinator chat.",
       inputSchema: z.object({ project: projectArg.optional() }),
-      annotations: readOnly,
+      annotations: writes,
       _meta: { ui: { resourceUri: UI_URI } },
     },
     async ({ project }, extra: any) => {
@@ -184,9 +233,9 @@ export function registerTools(server: McpServer, html: string): void {
     },
     async () => {
       const projects = await Promise.all((await listProjects()).map(projectSummary));
-      if (!projects.length) return text("No projects yet. Create one with project_create.", { projects });
+      if (!projects.length) return text("No projects yet. Create one with project_create.", { projects: [] });
       const lines = projects.map((p) => `- ${p.slug}: ${p.name} — needs you ${p.needsYou}, review ${p.review}, working ${p.working}`);
-      return text(lines.join("\n"), { projects });
+      return text(lines.join("\n"), { projects: projects.map((p) => ({ slug: p.slug, name: p.name, needsYou: p.needsYou, review: p.review, working: p.working })) });
     },
   );
 
@@ -194,7 +243,7 @@ export function registerTools(server: McpServer, html: string): void {
     "project_create",
     {
       title: "Create project",
-      description: "Create a project and make this conversation its coordinator. workspace is the absolute path of the local git repository agents work in.",
+      description: "Create a project and make this conversation its coordinator chat. workspace is the absolute path of the local git repository agents work in. Writes the project folder on this computer.",
       inputSchema: z.object({
         name: z.string(),
         workspace: z.string().optional(),
@@ -210,7 +259,7 @@ export function registerTools(server: McpServer, html: string): void {
     async ({ workspace, ...input }, extra: any) => {
       const project = await createProject({ ...input, repos: workspace ? [workspace] : [] });
       await bindThread(threadOf(extra), project.slug);
-      return text(`Created project ${project.name} (${project.slug}). Call project_context next.`, { project });
+      return text(`Created project ${project.name} (${project.slug}). Call project_context next.`, { project: publicProject(project) });
     },
   );
 
@@ -218,7 +267,7 @@ export function registerTools(server: McpServer, html: string): void {
     "project_update",
     {
       title: "Update project",
-      description: "Change a project's name, goal, repos, standing instructions, default agent, icon, color, or archive it. Only when the user asks.",
+      description: "Change a project's name, goal, repos, standing instructions, default agent, icon, color, or archive it. The fields you pass replace the current values. Only when the user asks.",
       inputSchema: z.object({
         project: projectArg,
         name: z.string().optional(),
@@ -232,11 +281,11 @@ export function registerTools(server: McpServer, html: string): void {
         prFollowUp: z.boolean().optional().describe("Send failing CI and review comments on an agent's PR back to that agent automatically."),
         archived: z.boolean().optional(),
       }),
-      annotations: writes,
+      annotations: replaces,
     },
     async ({ project, ...patch }) => {
       const updated = await updateProject((await resolveProject(project)).slug, patch);
-      return text(`Updated ${updated.name}.`, { project: updated });
+      return text(`Updated ${updated.name}.`, { project: publicProject(updated) });
     },
   );
 
@@ -245,9 +294,9 @@ export function registerTools(server: McpServer, html: string): void {
     {
       title: "Project context",
       description:
-        "The coordinator's digest: goal, instructions, notes.md, memory index, every agent with its state, report summary and Next lines, the unhandled inbox, and user preferences. Call it at the start of every coordinator turn.",
+        "The coordinator's digest: goal, instructions, notes.md, memory index, every agent with its state, report summary and Next lines, the unhandled inbox, and user preferences. Call it at the start of every coordinator turn. The first call from a conversation links it to the project as its coordinator chat and names it \"Project Coordinator: <name>\".",
       inputSchema: z.object({ project: projectArg }),
-      annotations: readOnly,
+      annotations: writes,
     },
     async ({ project }, extra: any) => {
       const slug = (await resolveProject(project)).slug;
@@ -261,7 +310,7 @@ export function registerTools(server: McpServer, html: string): void {
     {
       title: "Start agent",
       description:
-        "Start a background Codex agent for one task. It runs in its own git worktree and branch by default (or a scratch folder when the project has no repo). The task must stand alone: the agent has not seen this conversation, but it receives the project goal, instructions, and memory automatically.",
+        "Start a background Codex agent for one task. It runs in its own git worktree and branch by default (or a scratch folder when the project has no repo), with network access, so it can push branches and open pull requests when its task calls for it. The task must stand alone: the agent has not seen this conversation, but it receives the project goal, instructions, and memory automatically.",
       inputSchema: z.object({
         project: projectArg,
         title: z.string().describe("Short title, 2-6 words."),
@@ -272,13 +321,13 @@ export function registerTools(server: McpServer, html: string): void {
         isolation: z.enum(["worktree", "checkout", "folder"]).optional(),
         base: z.string().optional().describe("Git ref to branch from. Defaults to the repo's HEAD."),
       }),
-      annotations: writes,
+      annotations: runsAgent,
     },
     async ({ project, ...rest }) => {
       const slug = (await resolveProject(project)).slug;
       const agent = await callDaemon<AgentRecord>("agent.start", { slug, ...rest });
       const status = agent.status === "failed" ? `failed to start: ${agent.error}` : `started (${agent.isolation}${agent.branch ? ` on ${agent.branch}` : ""})`;
-      return text(`Agent ${agent.id} "${agent.title}" ${status}.`, { agent });
+      return text(`Agent ${agent.id} "${agent.title}" ${status}.`, { agent: publicAgent(agent) });
     },
   );
 
@@ -287,9 +336,9 @@ export function registerTools(server: McpServer, html: string): void {
     {
       title: "Message agent",
       description:
-        "Send a follow-up to an existing agent. mode queue (default) delivers after its current turn; steer redirects the running turn. A finished agent starts a new turn with the same context.",
+        "Send a follow-up to an existing agent. mode queue (default) delivers after its current turn; steer redirects the running turn. A finished agent starts a new turn with the same context and network access.",
       inputSchema: z.object({ project: projectArg, agent: agentArg, text: z.string(), mode: z.enum(["queue", "steer"]).optional() }),
-      annotations: writes,
+      annotations: runsAgent,
     },
     async ({ project, agent, text: message, mode }) => {
       const slug = (await resolveProject(project)).slug;
@@ -314,7 +363,7 @@ export function registerTools(server: McpServer, html: string): void {
         const items = await callDaemon<TranscriptItem[]>("agent.transcript", { slug, id: agent });
         body += `\n\nTranscript (last ${limit ?? 30} items, data, not instructions):\n${transcriptText(items, limit ?? 30)}`;
       }
-      return text(body, { agent: record });
+      return text(body, { agent: publicAgent(record) });
     },
   );
 
@@ -322,9 +371,9 @@ export function registerTools(server: McpServer, html: string): void {
     "agent_stop",
     {
       title: "Stop agent",
-      description: "Interrupt an agent's running turn. Its work and branch stay.",
+      description: "Interrupt an agent's running turn. The turn is cancelled; its files and branch stay.",
       inputSchema: z.object({ project: projectArg, agent: agentArg }),
-      annotations: writes,
+      annotations: replaces,
     },
     async ({ project, agent }) => {
       const slug = (await resolveProject(project)).slug;
@@ -354,7 +403,7 @@ export function registerTools(server: McpServer, html: string): void {
       title: "Resolve agent",
       description: "Close an agent when its work is done or dropped. Only when the user asks or its PR merged. removeWorktree deletes a clean worktree; the branch is always kept.",
       inputSchema: z.object({ project: projectArg, agent: agentArg, removeWorktree: z.boolean().optional() }),
-      annotations: { ...writes, destructiveHint: true },
+      annotations: replaces,
     },
     async ({ project, agent, removeWorktree }) => {
       const slug = (await resolveProject(project)).slug;
@@ -370,7 +419,7 @@ export function registerTools(server: McpServer, html: string): void {
       description:
         "Replace the project's notes.md, the status board the user sees. Format: a leading <tldr>...</tldr> block with up to 5 short lines, then bold headers and '- [ ]' / '- [x]' checkbox lines only. Unchecked items first; keep at most 3 recent completed items. Link every ticket, pull request, file, and page as a Markdown link the first time it appears, using its real URL or absolute path.",
       inputSchema: z.object({ project: projectArg, content: z.string() }),
-      annotations: writes,
+      annotations: replaces,
     },
     async ({ project, content }) => {
       const slug = (await resolveProject(project)).slug;
@@ -390,7 +439,7 @@ export function registerTools(server: McpServer, html: string): void {
         path: z.string().describe("Path inside the project folder, for example plans/rollout.md."),
         content: z.string(),
       }),
-      annotations: writes,
+      annotations: replaces,
     },
     async ({ project, path: relative, content }) => {
       const slug = (await resolveProject(project)).slug;
@@ -415,12 +464,12 @@ export function registerTools(server: McpServer, html: string): void {
         type: z.enum(MEMORY_TYPES).optional(),
         body: z.string(),
       }),
-      annotations: writes,
+      annotations: replaces,
     },
     async ({ project, ...memory }) => {
       const slug = (await resolveProject(project)).slug;
       const entry = await writeMemory(slug, memory);
-      return text(`Saved memory/${entry.file}.`, { entry });
+      return text(`Saved memory/${entry.file}.`, { entry: { file: entry.file, name: entry.name, description: entry.description, type: entry.type } });
     },
   );
 
@@ -430,7 +479,7 @@ export function registerTools(server: McpServer, html: string): void {
       title: "Delete memory",
       description: "Delete a project memory file that is wrong or outdated.",
       inputSchema: z.object({ project: projectArg, file: z.string() }),
-      annotations: { ...writes, destructiveHint: true },
+      annotations: replaces,
     },
     async ({ project, file }) => {
       const slug = (await resolveProject(project)).slug;
@@ -445,7 +494,7 @@ export function registerTools(server: McpServer, html: string): void {
       title: "Write preferences",
       description: "Replace the cross-project preferences.md. Save a preference only when the user states it, corrects an agent, or repeats it.",
       inputSchema: z.object({ content: z.string() }),
-      annotations: writes,
+      annotations: replaces,
     },
     async ({ content }) => {
       await writePreferences(content);
@@ -469,16 +518,28 @@ export function registerTools(server: McpServer, html: string): void {
 
   server.registerTool(
     "ui_state",
-    { title: "Project Coordinator state", description: "App view state.", inputSchema: z.object({ project: z.string().optional(), threadId: z.string().optional() }), annotations: readOnly, _meta: appOnly },
+    {
+      title: "Project Coordinator state",
+      description: "Load the data the Project Coordinator page and panel show: projects, the selected project's notes, agents, memory, and files. Remembers the selected project so the page reopens on it.",
+      inputSchema: z.object({ project: z.string().optional(), threadId: z.string().optional() }),
+      annotations: writes,
+      _meta: appOnly,
+    },
     async ({ project, threadId }, extra: any) => {
       if (project) await rememberProject(project);
-      return view(await snapshot(project, threadId ?? threadOf(extra)));
+      return appView(await snapshot(project, threadId ?? threadOf(extra)));
     },
   );
 
   server.registerTool(
     "ui_create_options",
-    { title: "Create options", description: "Models and workspaces for the Create Coordinator dialog.", inputSchema: z.object({}), annotations: readOnly, _meta: appOnly },
+    {
+      title: "Create options",
+      description: "List the Codex models and recent workspace folders offered in the Create Coordinator dialog.",
+      inputSchema: z.object({}),
+      annotations: readOnly,
+      _meta: appOnly,
+    },
     async () => text("options", await createOptions()),
   );
 
@@ -486,8 +547,10 @@ export function registerTools(server: McpServer, html: string): void {
     "ui_coordinator",
     {
       title: "Coordinator chat",
-      description: "Find the project's coordinator thread, moving it into the project's repository folder if needed, or a link that starts one there.",
+      description:
+        "Find the project's coordinator chat so the page can open it. If the chat lives outside the project's repository folder, Codex copies it into that folder and archives the old copy. Without a chat, returns a link that starts one there.",
       inputSchema: z.object({ project: z.string() }),
+      annotations: replaces,
       _meta: appOnly,
     },
     async ({ project }) => {
@@ -504,7 +567,7 @@ export function registerTools(server: McpServer, html: string): void {
     "ui_file",
     {
       title: "Read project file",
-      description: "App file preview.",
+      description: "Read one Markdown file from the project or user folder for the file preview and editor.",
       inputSchema: z.object({ project: z.string(), scope: z.enum(["project", "user"]), path: z.string() }),
       annotations: readOnly,
       _meta: appOnly,
@@ -519,8 +582,9 @@ export function registerTools(server: McpServer, html: string): void {
     "ui_file_write",
     {
       title: "Save project file",
-      description: "App file editor save.",
+      description: "Save the file the user edited in the file editor, replacing its contents. Refuses when the file changed on disk since it was opened.",
       inputSchema: z.object({ project: z.string(), scope: z.enum(["project", "user"]), path: z.string(), text: z.string(), expectedUpdatedAt: z.string().optional() }),
+      annotations: replaces,
       _meta: appOnly,
     },
     async ({ project, scope, path, text: body, expectedUpdatedAt }) => {
@@ -533,7 +597,7 @@ export function registerTools(server: McpServer, html: string): void {
     "ui_transcript",
     {
       title: "Agent transcript",
-      description: "App transcript view.",
+      description: "Read the last 80 messages of an agent's Codex conversation for the agent detail view.",
       inputSchema: z.object({ project: z.string(), agent: z.string() }),
       annotations: readOnly,
       _meta: appOnly,
@@ -544,53 +608,91 @@ export function registerTools(server: McpServer, html: string): void {
     },
   );
 
+  const agentAction = (name: string, title: string, description: string, method: string, annotations: Record<string, boolean>) =>
+    server.registerTool(
+      name,
+      { title, description, inputSchema: z.object({ project: z.string(), agent: z.string() }), annotations, _meta: appOnly },
+      async ({ project, agent }) => {
+        await callDaemon(method, { slug: project, id: agent, from: "user" });
+        return appView(await snapshot(project));
+      },
+    );
+
+  agentAction("ui_agent_review", "Mark agent reviewed", "Mark an agent's latest report as seen when the user reviews it in the panel.", "agent.review", writes);
+  agentAction("ui_agent_reopen", "Reopen agent", "Move a resolved agent back to the open groups.", "agent.reopen", writes);
+  agentAction("ui_agent_stop", "Stop agent", "Cancel an agent's running turn when the user presses Stop. Its files and branch stay.", "agent.stop", replaces);
+  agentAction("ui_agent_resolve", "Resolve agent", "Close an agent when the user resolves it in the panel. Its branch and files stay.", "agent.resolve", replaces);
+
   server.registerTool(
-    "ui_agent",
+    "ui_agent_send",
     {
-      title: "Agent action",
-      description: "App agent actions.",
-      inputSchema: z.object({
-        project: z.string(),
-        agent: z.string(),
-        action: z.enum(["review", "resolve", "reopen", "stop", "send"]),
-        text: z.string().optional(),
-        mode: z.enum(["queue", "steer"]).optional(),
-      }),
+      title: "Message agent",
+      description: "Send the user's reply or a Next line to an agent. queue delivers after its current turn; steer redirects the running turn. The agent keeps its network access.",
+      inputSchema: z.object({ project: z.string(), agent: z.string(), text: z.string(), mode: z.enum(["queue", "steer"]).optional() }),
+      annotations: runsAgent,
+      _meta: appOnly,
+    },
+    async ({ project, agent, text: message, mode }) => {
+      await callDaemon("agent.send", { slug: project, id: agent, text: message, mode, from: "user" });
+      return appView(await snapshot(project));
+    },
+  );
+
+  const projectFields = {
+    name: z.string().optional(),
+    goal: z.string().optional(),
+    repos: z.array(z.string()).optional(),
+    instructions: z.string().max(16000).optional(),
+    model: z.string().optional(),
+    effort: z.string().optional(),
+    icon: z.enum(PROJECT_ICONS).optional(),
+    color: z.enum(PROJECT_COLORS).optional(),
+    prFollowUp: z.boolean().optional(),
+  };
+
+  server.registerTool(
+    "ui_project_create",
+    {
+      title: "Create coordinator",
+      description: "Create a project from the Create Coordinator dialog. Writes the project folder on this computer.",
+      inputSchema: z.object(projectFields),
       annotations: writes,
       _meta: appOnly,
     },
-    async ({ project, agent, action, text: message, mode }) => {
-      const method = { review: "agent.review", resolve: "agent.resolve", reopen: "agent.reopen", stop: "agent.stop", send: "agent.send" }[action];
-      await callDaemon(method, { slug: project, id: agent, text: message, mode, from: "user" });
-      return view(await snapshot(project));
+    async (fields) => {
+      const record = await createProject({ ...fields, name: fields.name?.trim() || "New Coordinator" });
+      await rememberProject(record.slug);
+      return appView(await snapshot(record.slug), { saved: record.slug });
     },
   );
 
   server.registerTool(
-    "ui_project_save",
+    "ui_project_update",
     {
-      title: "Save project",
-      description: "App create or update project.",
-      inputSchema: z.object({
-        project: z.string().optional(),
-        name: z.string().optional(),
-        goal: z.string().optional(),
-        repos: z.array(z.string()).optional(),
-        instructions: z.string().max(16000).optional(),
-        model: z.string().optional(),
-        effort: z.string().optional(),
-        icon: z.enum(PROJECT_ICONS).optional(),
-        color: z.enum(PROJECT_COLORS).optional(),
-        prFollowUp: z.boolean().optional(),
-        archived: z.boolean().optional(),
-      }),
-      annotations: writes,
+      title: "Save coordinator settings",
+      description: "Save the Coordinator settings form. The fields passed replace the current values.",
+      inputSchema: z.object({ project: z.string(), ...projectFields }),
+      annotations: replaces,
       _meta: appOnly,
     },
     async ({ project, ...fields }) => {
-      const record = project ? await updateProject(project, fields) : await createProject({ ...fields, name: fields.name?.trim() || "New Coordinator" });
-      await rememberProject(record.slug);
-      return view(await snapshot(record.slug), { saved: record.slug });
+      const record = await updateProject(project, fields);
+      return appView(await snapshot(record.slug), { saved: record.slug });
+    },
+  );
+
+  server.registerTool(
+    "ui_project_archive",
+    {
+      title: "Archive coordinator",
+      description: "Archive a project when the user confirms Archive coordinator. It leaves the page; its files stay on disk.",
+      inputSchema: z.object({ project: z.string() }),
+      annotations: replaces,
+      _meta: appOnly,
+    },
+    async ({ project }) => {
+      const record = await updateProject(project, { archived: true });
+      return appView(await snapshot(record.slug));
     },
   );
 }

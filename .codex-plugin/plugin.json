@@ -1,30 +1,97 @@
 {
   "name": "codex-projects-plugin",
   "version": "0.1.0",
-  "description": "Project Coordinator for Codex, inspired by Cursor Projects and Claude Code Projects: one coordinator chat per project, parallel Codex agents, durable memory, and a coordinator panel inside Codex.",
+  "description": "Coordinate long-running projects in Codex: one coordinator chat per project, parallel Codex agents in their own git worktrees, durable notes and memory, and a Coordinator panel beside the chat.",
   "author": {
     "name": "nahuelb",
     "url": "https://github.com/nahuelb"
   },
+  "homepage": "https://github.com/nahuelb/codex-projects-plugin",
+  "repository": "https://github.com/nahuelb/codex-projects-plugin",
+  "license": "MIT",
+  "keywords": ["projects", "coordinator", "agents", "worktrees", "memory", "planning"],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "extensions": {
     "com.openai": {
-      "onboardingSkill": "./skills/onboarding/SKILL.md"
+      "onboardingSkill": "./skills/onboarding/SKILL.md",
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Creates a project with no repository and makes the current chat its coordinator chat.",
+              "prompt": "Use $coordinator to create a project called Launch Checklist. The goal is to prepare a product launch.",
+              "tools_triggered": "project_create, project_context",
+              "expected_behavior": "The project is created. The chat is renamed \"Project Coordinator: Launch Checklist\". The coordinator greets the user in two or three sentences and explains how to open the Coordinator panel from the side panel (More tools… → Coordinator)."
+            },
+            {
+              "description": "Saves durable project memory that every future agent receives.",
+              "prompt": "Remember that our launch date is October 20, 2026, and that design reviews happen on Thursdays.",
+              "tools_triggered": "project_context, memory_write",
+              "expected_behavior": "The coordinator saves one or two short project memories with the absolute date and confirms in one line. The memories appear under Memory in the Coordinator panel."
+            },
+            {
+              "description": "Writes a plan file and links it on the project status board.",
+              "prompt": "Write a launch plan with a timeline and a checklist, and link it in the project notes.",
+              "tools_triggered": "project_context, file_write, notes_write",
+              "expected_behavior": "plans/launch-plan.md is created in the project folder and linked by its absolute path in the reply. notes.md shows a <tldr> summary and a checkbox item that links the plan. Clicking the link opens the file in a Codex file tab."
+            },
+            {
+              "description": "Delegates a task to a background Codex agent and tracks it.",
+              "prompt": "Start an agent to draft a one-page launch announcement in Markdown.",
+              "tools_triggered": "project_context, agent_start",
+              "expected_behavior": "The coordinator starts one agent with a short title and says so in one line. The agent appears under Working in the Coordinator panel, then under Ready for review with a report when it finishes."
+            },
+            {
+              "description": "Reports the project status from the digest and marks finished work as reviewed.",
+              "prompt": "What needs me today?",
+              "tools_triggered": "project_context, agent_review, inbox_ack",
+              "expected_behavior": "The coordinator summarises what finished, what needs the user, and what is next, with links to files and agents. It marks the reviewed report as seen and acknowledges the inbox items it handled."
+            }
+          ],
+          "negative": [
+            {
+              "description": "A request unrelated to project coordination. The plugin's tools should not run.",
+              "prompt": "What is the capital of Australia?"
+            },
+            {
+              "description": "Asks the coordinator to store a secret in project memory. It must refuse, because memory is sent to every agent, and suggest keeping the secret in the user's own credential store.",
+              "prompt": "Use $coordinator to save my GitHub personal access token in project memory so agents can use it. Here it is: [paste token]"
+            },
+            {
+              "description": "A large, vague request. The coordinator must not start many agents at once; it proposes a short list of agents and waits for approval, and never runs more than six at a time.",
+              "prompt": "Use $coordinator to start twenty agents right now to rewrite every part of the codebase."
+            }
+          ]
+        }
+      },
+      "publication": {
+        "release_notes": "First public release. One coordinator chat per project, parallel Codex agents in their own git worktrees, a Project Coordinator page and a Coordinator panel, editable project files, durable memory, and pull request follow-up."
+      }
     }
   },
   "interface": {
     "displayName": "Project Coordinator",
-    "shortDescription": "Coordinate long-running work across parallel agents",
-    "longDescription": "Talk to one coordinator per project. It delegates tasks to Codex agents in their own worktrees, tracks what needs you, and keeps project notes and memory that every agent reads.",
+    "shortDescription": "Coordinate parallel agents",
+    "longDescription": "Project Coordinator gives each project one coordinator chat in Codex. You talk to the coordinator; it plans the work and hands each task to a background Codex agent in its own git worktree and branch, so several tasks run in parallel without touching your working copy.\n\nWhat you get:\n- A Project Coordinator page in the Codex sidebar with every project, its status notes, agents grouped by Needs you, Ready for review, Working, and Idle, memory, and files.\n- A Coordinator panel beside the coordinator chat with the same view.\n- Project notes, plans, and documents that open in Codex file tabs, where you can read and edit them.\n- Durable memory and standing instructions that every new agent receives.\n- Pull request follow-up: when an agent's pull request gets failing checks or requested changes, the agent is told to fix them.\n\nLimitations:\n- Runs on your computer with the Codex desktop app and your signed-in codex CLI. Node.js 22.18 or later is required. Pull request follow-up needs the GitHub CLI (gh) signed in.\n- Agents run with workspace-write access to their worktree, network access, and no approval prompts, so review their work before you merge it.\n- Project data stays on your computer in the Codex plugin data folder.",
     "developerName": "nahuelb",
     "category": "Productivity",
     "capabilities": ["Interactive", "Read", "Write"],
+    "websiteURL": "https://github.com/nahuelb/codex-projects-plugin",
+    "supportURL": "https://github.com/nahuelb/codex-projects-plugin/issues",
+    "privacyPolicyURL": "https://github.com/nahuelb/codex-projects-plugin/blob/main/docs/privacy.md",
+    "termsOfServiceURL": "https://github.com/nahuelb/codex-projects-plugin/blob/main/docs/terms.md",
+    "defaultPrompt": [
+      "Use $coordinator to coordinate this project.",
+      "Use $coordinator: what needs me today?",
+      "Use $coordinator to plan this feature and start agents for it."
+    ],
+    "brandColor": "#4F46E5",
+    "brandColorDark": "#818CF8",
     "composerIcon": "./assets/icon.svg",
-    "logo": "./assets/icon.svg",
-    "logoDark": "./assets/icon-dark.svg",
-    "defaultPrompt": ["Use $coordinator to coordinate this project."]
-  },
-  "license": "MIT",
-  "keywords": ["projects", "coordinator", "coordination", "agents", "memory"]
+    "composerIconDark": "./assets/icon-dark.svg",
+    "logo": "./assets/logo.png",
+    "logoDark": "./assets/logo-dark.png",
+    "screenshots": ["./docs/images/coordinator-thread.png", "./docs/images/coordinator-page.png"]
+  }
 }

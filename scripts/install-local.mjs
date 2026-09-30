@@ -26,7 +26,7 @@ await mkdir(path.dirname(target), { recursive: true });
 const staging = await mkdtemp(path.join(path.dirname(target), `.${name}-staging-`));
 let backup;
 try {
-  for (const entry of [".codex-plugin", ".mcp.json", "skills", "assets", "dist", "README.md", "LICENSE"]) {
+  for (const entry of [".codex-plugin", ".mcp.json", "skills", "assets", "docs/images", "dist", "README.md", "LICENSE"]) {
     if (existsSync(entry)) await cp(entry, path.join(staging, entry), { recursive: true });
   }
   const manifestFile = path.join(staging, ".codex-plugin", "plugin.json");

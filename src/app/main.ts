@@ -168,8 +168,8 @@ function toast(text: string, kind: "ok" | "error" = "ok"): void {
   }, 3200);
 }
 
-async function refresh(): Promise<void> {
-  const data = await host.call("ui_state", { project: current()?.project.slug, threadId: state.threadId });
+async function refresh(project = current()?.project.slug): Promise<void> {
+  const data = await host.call("ui_state", { project, threadId: state.threadId });
   apply(data.snapshot as Snapshot);
 }
 
@@ -840,7 +840,7 @@ async function onAction(target: HTMLElement): Promise<void> {
       const line = agent?.report?.next[Number(target.dataset.index)];
       if (!detail || !agent || !line) return;
       return run(async () => {
-        const result = await host.call("ui_agent", { project: detail.project.slug, agent: agent.id, action: "send", text: line });
+        const result = await host.call("ui_agent_send", { project: detail.project.slug, agent: agent.id, text: line });
         state.snapshot = result.snapshot;
       }, `Sent to ${agent.title}`);
     }
@@ -850,7 +850,7 @@ async function onAction(target: HTMLElement): Promise<void> {
       if (!detail || !agent) return;
       if (op === "resolve" && !confirm(`Resolve "${agent.title}"? Its branch and files stay.`)) return;
       return run(async () => {
-        const result = await host.call("ui_agent", { project: detail.project.slug, agent: agent.id, action: op });
+        const result = await host.call(`ui_agent_${op}`, { project: detail.project.slug, agent: agent.id });
         state.snapshot = result.snapshot;
         if (op === "resolve") state.page = { kind: "project" };
       });
@@ -858,7 +858,7 @@ async function onAction(target: HTMLElement): Promise<void> {
     case "archive":
       if (!detail || !confirm(`Archive ${detail.project.name}? Its files stay on disk.`)) return;
       return run(async () => {
-        const result = await host.call("ui_project_save", { project: detail.project.slug, archived: true });
+        const result = await host.call("ui_project_archive", { project: detail.project.slug });
         state.snapshot = result.snapshot;
         state.page = { kind: "project" };
       }, "Coordinator archived");
@@ -874,7 +874,7 @@ async function onSubmit(form: HTMLFormElement): Promise<void> {
     draft.saving = true;
     render();
     try {
-      const result = await host.call("ui_project_save", {
+      const result = await host.call("ui_project_create", {
         name: draft.name.trim() || "New Coordinator",
         icon: draft.icon,
         color: draft.color,
@@ -898,7 +898,7 @@ async function onSubmit(form: HTMLFormElement): Promise<void> {
     const draft = state.settings;
     const workspace = draft.workspace === "__other" ? draft.otherPath.trim() : draft.workspace;
     return run(async () => {
-      const result = await host.call("ui_project_save", {
+      const result = await host.call("ui_project_update", {
         project: detail.project.slug,
         name: draft.name,
         icon: draft.icon,
@@ -919,7 +919,7 @@ async function onSubmit(form: HTMLFormElement): Promise<void> {
     const text = data.text?.trim();
     if (!agent || !text) return;
     return run(async () => {
-      const result = await host.call("ui_agent", { project: detail.project.slug, agent: agent.id, action: "send", text, mode: data.steer ? "steer" : "queue" });
+      const result = await host.call("ui_agent_send", { project: detail.project.slug, agent: agent.id, text, mode: data.steer ? "steer" : "queue" });
       state.snapshot = result.snapshot;
       delete state.drafts[agent.id];
     }, "Sent");
@@ -1080,14 +1080,24 @@ function applyContext(context: McpUiHostContext | undefined): void {
 
 function handleContent(content: Record<string, any>): void {
   if (content.mode === "panel" || content.mode === "home") state.mode = content.mode;
-  apply(content.snapshot as Snapshot);
-  if (content.create) openCreate();
+  const ready = content.snapshot ? Promise.resolve(apply(content.snapshot as Snapshot)) : refresh(content.project ?? undefined);
+  void ready.then(
+    () => {
+      if (content.create) openCreate();
+    },
+    (error) => toast(String(error.message ?? error), "error"),
+  );
 }
+
+const resultContent = (result: { structuredContent?: unknown; _meta?: unknown }) => ({
+  ...((result.structuredContent ?? {}) as Record<string, any>),
+  ...((result._meta ?? {}) as Record<string, any>),
+});
 
 function connectMcpHost(): Host {
   const app = new App({ name: "coordinator", version: "0.2.0" }, {}, { autoResize: true });
   const extensions = new OpenAIExtensions(app);
-  app.ontoolresult = (result) => handleContent((result.structuredContent ?? {}) as Record<string, any>);
+  app.ontoolresult = (result) => handleContent(resultContent(result));
   app.addEventListener("hostcontextchanged", (context) => {
     applyContext({ ...app.getHostContext(), ...context });
     if ((context as Record<string, unknown>)["openai/modelContext"] === null) {
