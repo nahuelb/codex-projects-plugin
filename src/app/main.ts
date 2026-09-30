@@ -655,6 +655,8 @@ async function saveFile(): Promise<void> {
 }
 
 async function openCoordinator(slug: string): Promise<void> {
+  const project = state.snapshot?.projects.find((item) => item.slug === slug);
+  if (!project?.coordinatorThreadId) toast("Setting up the coordinator chat. This takes about half a minute.");
   const info = await host.call("ui_coordinator", { project: slug });
   if (info.threadId && (await host.openLink(`codex://threads/${info.threadId}`))) return;
   if (info.newThreadUrl && (await host.openLink(info.newThreadUrl))) return;

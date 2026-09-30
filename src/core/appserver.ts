@@ -5,10 +5,13 @@ type Json = any;
 
 export type OneShotCall = <T = Json>(method: string, params: unknown, timeoutMs?: number) => Promise<T>;
 
-export async function withAppServer<T>(binary: string, version: string, work: (call: OneShotCall) => Promise<T>): Promise<T> {
+export type OneShotWait = (method: string, match: (params: Json) => boolean, timeoutMs: number) => Promise<Json>;
+
+export async function withAppServer<T>(binary: string, version: string, work: (call: OneShotCall, wait: OneShotWait) => Promise<T>): Promise<T> {
   const child = spawn(binary, ["app-server", "--listen", "stdio://"], { stdio: ["pipe", "pipe", "pipe"], env: process.env });
   const pending = new Map<number, { resolve: (value: Json) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
   let nextId = 0;
+  const waiters = new Set<{ method: string; match: (params: Json) => boolean; resolve: (params: Json) => void }>();
   const fail = (error: Error) => {
     for (const entry of pending.values()) {
       clearTimeout(entry.timer);
@@ -28,6 +31,14 @@ export async function withAppServer<T>(binary: string, version: string, work: (c
     try {
       message = JSON.parse(line);
     } catch {
+      return;
+    }
+    if (message.id == null && typeof message.method === "string") {
+      for (const waiter of waiters) {
+        if (waiter.method !== message.method || !waiter.match(message.params ?? {})) continue;
+        waiters.delete(waiter);
+        waiter.resolve(message.params ?? {});
+      }
       return;
     }
     const entry = message.id != null ? pending.get(message.id) : undefined;
@@ -50,7 +61,16 @@ export async function withAppServer<T>(binary: string, version: string, work: (c
   try {
     await call("initialize", { clientInfo: { name: "codex-projects-plugin", title: "Project Coordinator", version }, capabilities: null }, 30_000);
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "initialized" })}\n`);
-    return await work(call);
+    const wait: OneShotWait = (method, match, timeoutMs) =>
+      new Promise((resolve, reject) => {
+        const waiter = { method, match, resolve: (params: Json) => { clearTimeout(timer); resolve(params); } };
+        const timer = setTimeout(() => {
+          waiters.delete(waiter);
+          reject(new Error(`Codex did not finish ${method} in time`));
+        }, timeoutMs);
+        waiters.add(waiter);
+      });
+    return await work(call, wait);
   } finally {
     child.kill();
     const forced = setTimeout(() => child.kill("SIGKILL"), 3_000);

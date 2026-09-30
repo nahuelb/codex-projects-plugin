@@ -24,7 +24,7 @@ import {
 } from "../core/store.ts";
 import { composeBrief } from "../core/brief.ts";
 import { prepareAgent, refreshPullRequests, reopenAgent, resolveAgent, reviewAgent, syncProject } from "../core/board.ts";
-import { bindThread, coordinatorThread, createOptions, projectForThread, rememberProject, snapshot } from "./state.ts";
+import { bindThread, coordinatorKickoff, coordinatorThread, createOptions, projectForThread, rememberProject, snapshot } from "./state.ts";
 
 
 const ICON_SVG =
@@ -73,8 +73,6 @@ const threadOf = (extra: any): string | undefined => {
   return typeof id === "string" && id ? id : undefined;
 };
 
-export const COORDINATOR_KICKOFF = (name: string, slug: string) =>
-  `$coordinator Start the project "${name}" (${slug}). You are its coordinator.`;
 
 function registerMentions(server: McpServer): void {
   createMentions(server).setHandler(async ({ query }: { query: string }) => {
@@ -454,17 +452,18 @@ export function registerTools(server: McpServer, html: string): void {
     "ui_coordinator",
     {
       title: "Coordinator chat",
-      description: "Find the project's coordinator thread, moving it into the project's repository folder if needed, or a link that starts one there.",
+      description: "Find the project's coordinator chat, creating it in the project's repository folder when it does not exist yet, and move it there if it lives elsewhere.",
       inputSchema: z.object({ project: z.string() }),
       _meta: appOnly,
     },
     async ({ project }) => {
       const record = await resolveProject(project);
       await rememberProject(record.slug);
-      const kickoff = COORDINATOR_KICKOFF(record.name, record.slug);
+      const kickoff = coordinatorKickoff(record.name, record.slug);
       const params = new URLSearchParams({ prompt: kickoff });
       if (record.repos[0]) params.set("path", record.repos[0]);
-      return text("coordinator", { threadId: (await coordinatorThread(record.slug)) ?? null, kickoff, newThreadUrl: `codex://threads/new?${params}` });
+      const threadId = await coordinatorThread(record.slug).catch(() => undefined);
+      return text("coordinator", { threadId: threadId ?? null, kickoff, newThreadUrl: `codex://threads/new?${params}` });
     },
   );
 

@@ -10,7 +10,7 @@ The prompts and code are original. See [docs/design.md](docs/design.md) for how 
 
 ## What you get
 
-- **Create Coordinator.** Pick an icon, a name, a workspace, and a model. Project Coordinator opens the project's coordinator chat in that workspace with the kickoff message ready to send.
+- **Create Coordinator.** Pick an icon, a name, a workspace, and a model. Project Coordinator creates the project's coordinator chat in that workspace, lets the coordinator greet you, and opens it. From then on, the Coordinator page always opens that same chat.
 - **A Project Coordinator page in the Codex sidebar.** A project list like Code Review with each project's notes, agents, memory, and files. Click a project to open its coordinator chat.
 - **One coordinator chat per project.** It lives in the project's repository folder in the Codex sidebar and is named "Project Coordinator: <name>". It keeps one long thread that compacts but is never replaced, so the coordinator builds up context. A coordinator chat started elsewhere moves into the repository folder the next time you open it from the page.
 - **A Coordinator panel beside the chat.** Open it once per coordinator chat from the side panel: **More tools… → Coordinator**. Notes, agents grouped by *Needs you*, *Ready for review*, *Working*, and *Idle*, memory, and all files, in one scrolling panel.

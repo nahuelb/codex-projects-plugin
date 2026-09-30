@@ -1,15 +1,41 @@
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ModelOption } from "../shared/types.ts";
 import { VERSION } from "../shared/version.ts";
-import { withAppServer, type OneShotCall } from "../core/appserver.ts";
+import { withAppServer, type OneShotCall, type OneShotWait } from "../core/appserver.ts";
 
 type Json = Record<string, any>;
 
 const codexBinary = () => process.env.PROJECTS_CODEX_BIN || "codex";
 
-const withCodex = <T>(work: (call: OneShotCall) => Promise<T>) => withAppServer(codexBinary(), VERSION, work);
+const withCodex = <T>(work: (call: OneShotCall, wait: OneShotWait) => Promise<T>) => withAppServer(codexBinary(), VERSION, work);
+
+const KICKOFF_TIMEOUT_MS = 180_000;
+
+function coordinatorSkillPath(): string | undefined {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  return [path.join(here, "..", "skills", "coordinator", "SKILL.md"), path.join(here, "..", "..", "skills", "coordinator", "SKILL.md")].find((file) => existsSync(file));
+}
+
+export function startCoordinatorThread(input: { cwd: string; name: string; kickoff: string; model?: string }): Promise<string> {
+  return withCodex(async (call, wait) => {
+    const started: Json = await call("thread/start", { cwd: input.cwd, model: input.model || null });
+    const threadId: string | undefined = started.thread?.id;
+    if (!threadId) throw new Error("Codex did not create the coordinator chat.");
+    await call("thread/name/set", { threadId, name: input.name });
+    const skill = coordinatorSkillPath();
+    const finished = wait("turn/completed", (params) => params.threadId === threadId, KICKOFF_TIMEOUT_MS);
+    await call("turn/start", {
+      threadId,
+      effort: "low",
+      input: [...(skill ? [{ type: "skill", name: "coordinator", path: skill }] : []), { type: "text", text: input.kickoff, text_elements: [] }],
+    });
+    await finished;
+    return threadId;
+  });
+}
 
 export function renameThread(threadId: string, name: string): Promise<boolean> {
   return withCodex(async (call) => {

@@ -7,7 +7,8 @@ import { readJson, withFileLock, writeJsonAtomic } from "../core/fsutil.ts";
 import { paths, rootDir } from "../core/paths.ts";
 import { refreshPullRequests, syncProject } from "../core/board.ts";
 import { getProject, listProjects, projectDetail, projectSummary, updateProject } from "../core/store.ts";
-import { archiveThread, listCreateOptions, relocateThread, renameThread } from "./codex.ts";
+import { findRollout } from "../core/rollout.ts";
+import { archiveThread, listCreateOptions, relocateThread, renameThread, startCoordinatorThread } from "./codex.ts";
 
 const run = promisify(execFile);
 
@@ -72,11 +73,36 @@ async function mapThread(threadId: string, slug: string): Promise<void> {
   });
 }
 
+export const coordinatorKickoff = (name: string, slug: string) => `$coordinator Start the project "${name}" (${slug}). You are its coordinator.`;
+
+const creating = new Map<string, Promise<string>>();
+
+function createCoordinatorThread(slug: string): Promise<string> {
+  const running = creating.get(slug);
+  if (running) return running;
+  const work = (async () => {
+    const project = await getProject(slug);
+    const threadId = await startCoordinatorThread({
+      cwd: project.repos[0] ?? paths.project(slug),
+      name: coordinatorThreadName(project.name),
+      kickoff: coordinatorKickoff(project.name, slug),
+      model: project.model,
+    });
+    const latest = await getProject(slug);
+    if (latest.coordinatorThreadId !== threadId) await updateProject(slug, { coordinatorThreadId: threadId });
+    await mapThread(threadId, slug);
+    return threadId;
+  })().finally(() => creating.delete(slug));
+  creating.set(slug, work);
+  return work;
+}
+
 export async function coordinatorThread(slug: string): Promise<string | undefined> {
   const project = await getProject(slug);
-  const threadId = project.coordinatorThreadId;
+  const threadId = project.coordinatorThreadId && (await findRollout(project.coordinatorThreadId)) ? project.coordinatorThreadId : undefined;
+  if (!threadId) return createCoordinatorThread(slug);
   const repo = project.repos[0];
-  if (!threadId || !repo) return threadId;
+  if (!repo) return threadId;
   try {
     const moved = await relocateThread(threadId, repo, coordinatorThreadName(project.name));
     if (moved.moved) {
