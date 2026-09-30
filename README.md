@@ -2,7 +2,7 @@
 
 Project Coordinator is a Codex plugin inspired by Cursor Projects and Claude Code Projects. Each project gets a coordinator chat. It hands each task to a native Codex subagent, gives parallel code changes their own git worktree, tracks what needs you, and keeps notes and memory that every agent reads.
 
-[![Project Coordinator demo: the coordinator page, a coordinator chat that starts two subagents, the Subagents tab, and the board](docs/images/demo-video.png)](docs/demo.mp4)
+![Project Coordinator demo: the coordinator page, a coordinator chat that starts two subagents, the Subagents tab, and the board](docs/demo.gif)
 
 The prompts and code are original. See [docs/design.md](docs/design.md) for how each pattern maps here and what is not built yet.
 
