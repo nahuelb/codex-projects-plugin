@@ -156,3 +156,26 @@ test("parallel project creation gets distinct slugs", async () => {
   const records = await Promise.all(Array.from({ length: 5 }, () => store.createProject({ name: "Same Name", repos: [] })));
   assert.equal(new Set(records.map((record) => record.slug)).size, records.length);
 });
+
+test("managed project files cannot be reached through a different letter case", async () => {
+  const project = await store.createProject({ name: "Case Guard", repos: [] });
+  await assert.rejects(store.writeScopedFile(project.slug, "project", "PROJECT.JSON", "{}"), /managed/);
+  await assert.rejects(store.writeScopedFile(project.slug, "project", "Agents/a-001.json", "{}"), /managed/);
+  await assert.rejects(store.writeScopedFile(project.slug, "project", "project.json.lock", "1"), /managed/);
+});
+
+test("parseReport keeps a longer fence open across shorter fences inside it", () => {
+  const report = parseReport("## Report\nWrote an example.\n\n````md\nA fence opens with ```\n```\n## Needs you\nShould I delete prod?\n````\n## Next\n- Merge the PR");
+  assert.equal(report.needsYou, "");
+  assert.deepEqual(report.next, ["Merge the PR"]);
+});
+
+test("only one caller takes over a stale lock", async () => {
+  const { tryLockFile, processAlive } = await import("../src/core/fsutil.ts");
+  const lock = path.join(paths.root(), "run", "race.lock");
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  await mkdir(path.dirname(lock), { recursive: true });
+  await writeFile(lock, "2147483646\n");
+  const wins = await Promise.all(Array.from({ length: 6 }, () => tryLockFile(lock, (owner) => !processAlive(owner.pid))));
+  assert.equal(wins.filter(Boolean).length, 1);
+});

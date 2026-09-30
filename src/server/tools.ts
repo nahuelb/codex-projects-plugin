@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import path from "node:path";
 import { ResourceTemplate, type McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AgentRecord, Snapshot, TranscriptItem } from "../shared/types.ts";
@@ -393,8 +394,9 @@ export function registerTools(server: McpServer, html: string): void {
     },
     async ({ project, path: relative, content }) => {
       const slug = (await resolveProject(project)).slug;
-      const clean = relative.replace(/^\.?\//, "");
-      if (clean === "notes.md" || clean === "MEMORY.md" || clean.startsWith("memory/")) throw new Error("Use notes_write or memory_write for that file.");
+      const clean = path.posix.normalize(relative.replace(/^\.?\//, ""));
+      const lower = clean.toLowerCase();
+      if (lower === "notes.md" || lower === "memory.md" || lower === "memory" || lower.startsWith("memory/")) throw new Error("Use notes_write or memory_write for that file.");
       const file = await writeScopedFile(slug, "project", clean, content.trim() + "\n");
       return text(`Saved ${clean}. Link: [${clean.split("/").pop()}](${file.path})`, { path: file.path });
     },

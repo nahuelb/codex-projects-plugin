@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { AgentRecord, AgentUsage, Harness, Isolation, TranscriptItem } from "../shared/types.ts";
+import type { AgentRecord, AgentUsage, Harness, Isolation, ProjectRecord, TranscriptItem } from "../shared/types.ts";
 import { composeBrief, workerContract } from "../core/brief.ts";
 import { ensureDir, nowIso } from "../core/fsutil.ts";
 import { createWorktree, gitCommonDir, isGitRepo, removeWorktree } from "../core/git.ts";
@@ -67,6 +67,8 @@ export class AgentService {
   private readonly adapters: Record<Harness, HarnessAdapter>;
   readonly codex: HarnessAdapter;
   private saveChain: Promise<void> = Promise.resolve();
+  private reservedSlots = 0;
+  private flushingDeferred = false;
 
   constructor(factories: Record<Harness, AdapterFactory>) {
     const hooks = this.hooks();
@@ -87,8 +89,24 @@ export class AgentService {
     return write;
   }
 
+  private persistInBackground(agent: AgentRecord): void {
+    this.persist(agent).catch((error) => console.error(new Date().toISOString(), `save ${agentKey(agent)}`, error));
+  }
+
   private workingCount(): number {
-    return [...this.agents.values()].filter((agent) => !agent.resolved && (agent.status === "working" || agent.status === "starting")).length;
+    const working = [...this.agents.values()].filter((agent) => !agent.resolved && (agent.status === "working" || agent.status === "starting")).length;
+    return working + this.reservedSlots;
+  }
+
+  private reserveSlot(): () => void {
+    if (this.workingCount() >= MAX_WORKING) throw new Error(`${MAX_WORKING} agents are already working. Wait for one to finish or stop one first.`);
+    this.reservedSlots += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.reservedSlots -= 1;
+    };
   }
 
   private handle(key: string): AgentRecord | undefined {
@@ -101,7 +119,7 @@ export class AgentService {
         const agent = this.handle(agentKey);
         if (!agent) return;
         agent.sessionId = sessionId;
-        void this.persist(agent);
+        this.persistInBackground(agent);
       },
       onWorking: (agentKey, turnId) => {
         const agent = this.handle(agentKey);
@@ -109,19 +127,19 @@ export class AgentService {
         agent.status = "working";
         agent.turnId = turnId ?? agent.turnId;
         agent.activity = agent.activity ?? "Starting";
-        void this.persist(agent);
+        this.persistInBackground(agent);
       },
       onActivity: (agentKey, activity) => {
         const agent = this.handle(agentKey);
         if (!agent) return;
         agent.activity = activity;
-        void this.persist(agent);
+        this.persistInBackground(agent);
       },
       onMessage: (agentKey, text) => {
         const agent = this.handle(agentKey);
         if (!agent) return;
         agent.lastMessage = text;
-        void this.persist(agent);
+        this.persistInBackground(agent);
       },
       onUsage: (agentKey, usage: AgentUsage) => {
         const agent = this.handle(agentKey);
@@ -133,10 +151,19 @@ export class AgentService {
         if (!agent) return;
         agent.status = "waiting";
         agent.activity = reason;
-        void this.persist(agent);
-        void addInbox(agent.slug, { kind: "agent_waiting", agentId: agent.id, title: agent.title, summary: reason });
+        this.persistInBackground(agent);
+        addInbox(agent.slug, { kind: "agent_waiting", agentId: agent.id, title: agent.title, summary: reason }).catch((error) => console.error(new Date().toISOString(), "inbox", error));
       },
-      onTurnEnd: (agentKey, end) => void this.onTurnEnd(agentKey, end),
+      onTurnEnd: (agentKey, end) => {
+        this.onTurnEnd(agentKey, end).catch((error) => console.error(new Date().toISOString(), `turn end ${agentKey}`, error));
+      },
+      onQueueDelivered: (agentKey, count) => {
+        const agent = this.handle(agentKey);
+        if (!agent?.queued) return;
+        const rest = agent.queued.slice(count);
+        agent.queued = rest.length ? rest : undefined;
+        this.persistInBackground(agent);
+      },
     };
   }
 
@@ -147,8 +174,12 @@ export class AgentService {
     agent.finishedAt = nowIso();
     agent.activity = undefined;
     agent.lastMessage = end.message || agent.lastMessage;
-    if (end.message) agent.report = parseReport(end.message);
-    if (end.deliveredQueue || end.outcome === "interrupted") agent.queued = undefined;
+    if (end.message) {
+      const previousPr = agent.report?.pr ?? agent.pr?.url;
+      agent.report = parseReport(end.message);
+      if (!agent.report.pr && previousPr) agent.report.pr = previousPr;
+    }
+    if (end.outcome === "interrupted") agent.queued = undefined;
     if (agent.report?.pr && agent.pr?.url !== agent.report.pr) agent.pr = undefined;
     agent.reviewed = false;
     if (end.outcome === "completed") {
@@ -219,8 +250,15 @@ export class AgentService {
     const repo = input.repo?.trim() ? path.resolve(input.repo.trim()) : input.isolation === "folder" ? undefined : project.repos[0];
     const isolation: Isolation = input.isolation ?? (repo ? ((await isGitRepo(repo)) ? "worktree" : "checkout") : "folder");
     if (isolation !== "folder" && !repo) throw new Error(`Isolation "${isolation}" needs a repository. Add one to the project or pass repo.`);
-    const working = this.workingCount();
-    if (working >= MAX_WORKING) throw new Error(`${working} agents are already working (limit ${MAX_WORKING}). Wait for one to finish or stop one first.`);
+    const release = this.reserveSlot();
+    try {
+      return await this.startReserved(project, input, adapter, harness, repo, isolation);
+    } finally {
+      release();
+    }
+  }
+
+  private async startReserved(project: ProjectRecord, input: StartAgentInput, adapter: HarnessAdapter, harness: Harness, repo: string | undefined, isolation: Isolation): Promise<AgentRecord> {
     const id = await nextAgentId(project.slug);
     const now = nowIso();
     const agent: AgentRecord = {
@@ -281,20 +319,27 @@ export class AgentService {
     const adapter = this.adapters[agent.harness];
     const text = input.text.trim();
     const startsTurn = !adapter.isRunning(agentKey(agent));
-    if (startsTurn && this.workingCount() >= MAX_WORKING) throw new Error(`${MAX_WORKING} agents are already working. Wait for one to finish or stop one first.`);
-    const pending = agent.queued ?? [];
-    const outgoing = startsTurn && pending.length ? [...pending, text].join("\n\n") : text;
-    const result = await adapter.send(agent, outgoing, input.mode ?? "queue", await this.instructionsFor(agent));
-    agent.followUps.push({ at: nowIso(), text, from: input.from ?? "coordinator" });
-    if (result === "queued") agent.queued = [...pending, text];
-    else if (startsTurn) agent.queued = undefined;
-    if (result !== "queued") {
-      agent.status = "working";
-      agent.error = undefined;
-      agent.activity = result === "steered" ? "Redirected" : "Reading your message";
+    const release = startsTurn ? this.reserveSlot() : () => undefined;
+    try {
+      const pending = startsTurn ? [...(agent.queued ?? [])] : [];
+      const outgoing = pending.length ? [...pending, text].join("\n\n") : text;
+      const result = await adapter.send(agent, outgoing, input.mode ?? "queue", await this.instructionsFor(agent));
+      agent.followUps.push({ at: nowIso(), text, from: input.from ?? "coordinator" });
+      if (result === "queued") agent.queued = [...(agent.queued ?? []), text];
+      else if (pending.length) {
+        const rest = (agent.queued ?? []).slice(pending.length);
+        agent.queued = rest.length ? rest : undefined;
+      }
+      if (result !== "queued") {
+        agent.status = "working";
+        agent.error = undefined;
+        agent.activity = result === "steered" ? "Redirected" : "Reading your message";
+      }
+      await this.persist(agent);
+      return { agent, result };
+    } finally {
+      release();
     }
-    await this.persist(agent);
-    return { agent, result };
   }
 
   async stop(slug: string, id: string): Promise<AgentRecord> {
@@ -340,15 +385,23 @@ export class AgentService {
   }
 
   private async flushDeferred(): Promise<void> {
-    for (const agent of this.agents.values()) {
-      if (!agent.deferred?.length || agent.resolved || this.workingCount() >= MAX_WORKING) continue;
-      const text = agent.deferred.join("\n\n");
-      agent.deferred = undefined;
-      await this.persist(agent);
-      await this.send({ slug: agent.slug, id: agent.id, text, mode: "queue", from: "coordinator" }).catch(async () => {
-        agent.deferred = [text];
+    if (this.flushingDeferred) return;
+    this.flushingDeferred = true;
+    try {
+      for (const agent of this.agents.values()) {
+        if (!agent.deferred?.length || agent.resolved || this.workingCount() >= MAX_WORKING) continue;
+        const batch = [...agent.deferred];
+        const sent = await this.send({ slug: agent.slug, id: agent.id, text: batch.join("\n\n"), mode: "queue", from: "coordinator" }).then(
+          () => true,
+          () => false,
+        );
+        if (!sent) continue;
+        const rest = (agent.deferred ?? []).slice(batch.length);
+        agent.deferred = rest.length ? rest : undefined;
         await this.persist(agent);
-      });
+      }
+    } finally {
+      this.flushingDeferred = false;
     }
   }
 

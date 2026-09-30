@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { link, mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 
@@ -86,24 +86,57 @@ export async function insideRootReal(root: string, relative: string): Promise<st
 
 const LOCK_STALE_MS = 15_000;
 const LOCK_WAIT_MS = 5_000;
+const TAKEOVER_STALE_MS = 10_000;
+
+export function processAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+export interface LockOwner {
+  pid: number;
+  ageMs: number;
+}
+
+async function lockOwner(lock: string): Promise<LockOwner | undefined> {
+  try {
+    const [text, info] = await Promise.all([readFile(lock, "utf8"), stat(lock)]);
+    return { pid: Number(text.trim()), ageMs: Date.now() - info.mtimeMs };
+  } catch {
+    return undefined;
+  }
+}
+
+export async function tryLockFile(lock: string, isStale: (owner: LockOwner) => boolean): Promise<boolean> {
+  const stamp = `${process.pid}\n`;
+  if (await createExclusive(lock, stamp)) return true;
+  const takeover = `${lock}.takeover`;
+  if (!(await createExclusive(takeover, stamp))) {
+    const guard = await lockOwner(takeover);
+    if (guard && guard.ageMs > TAKEOVER_STALE_MS && !processAlive(guard.pid)) await rm(takeover, { force: true });
+    return false;
+  }
+  try {
+    const owner = await lockOwner(lock);
+    if (owner && isStale(owner)) await rm(lock, { force: true });
+    return await createExclusive(lock, stamp);
+  } finally {
+    await rm(takeover, { force: true });
+  }
+}
 
 export async function withFileLock<T>(file: string, work: () => Promise<T>): Promise<T> {
   const lock = `${file}.lock`;
   await ensureDir(path.dirname(file));
   const deadline = Date.now() + LOCK_WAIT_MS;
-  for (;;) {
-    try {
-      const handle = await open(lock, "wx");
-      await handle.writeFile(String(process.pid));
-      await handle.close();
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const age = await stat(lock).then((info) => Date.now() - info.mtimeMs, () => 0);
-      if (age > LOCK_STALE_MS) await rm(lock, { force: true });
-      else if (Date.now() > deadline) throw new Error(`Timed out waiting for ${path.basename(file)}.`);
-      else await new Promise((resolve) => setTimeout(resolve, 20 + Math.random() * 40));
-    }
+  while (!(await tryLockFile(lock, (owner) => !processAlive(owner.pid) || owner.ageMs > LOCK_STALE_MS))) {
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${path.basename(file)}.`);
+    await new Promise((resolve) => setTimeout(resolve, 20 + Math.random() * 40));
   }
   try {
     return await work();
@@ -114,14 +147,16 @@ export async function withFileLock<T>(file: string, work: () => Promise<T>): Pro
 
 export async function createExclusive(file: string, text: string): Promise<boolean> {
   await ensureDir(path.dirname(file));
+  const staged = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.new`;
+  await writeFile(staged, text, { flag: "wx" });
   try {
-    const handle = await open(file, "wx");
-    await handle.writeFile(text);
-    await handle.close();
+    await link(staged, file);
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
     throw error;
+  } finally {
+    await rm(staged, { force: true });
   }
 }
 

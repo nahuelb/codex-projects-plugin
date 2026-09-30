@@ -56,12 +56,14 @@ function withoutFences(text: string): string {
   return text
     .split(/\r?\n/)
     .map((line) => {
-      const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
-      if (marker && (!fence || marker[0] === fence[0])) {
-        fence = fence ? undefined : marker;
+      const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      if (!fence) {
+        if (!match) return line;
+        fence = match[1];
         return "";
       }
-      return fence ? "" : line;
+      if (match && match[1][0] === fence[0] && match[1].length >= fence.length && !match[2].trim()) fence = undefined;
+      return "";
     })
     .join("\n");
 }

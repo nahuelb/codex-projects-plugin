@@ -1,6 +1,6 @@
 import http from "node:http";
-import { readFile, rm, writeFile } from "node:fs/promises";
-import { createExclusive } from "../core/fsutil.ts";
+import { rm, writeFile } from "node:fs/promises";
+import { processAlive, tryLockFile } from "../core/fsutil.ts";
 import { widenPath } from "../core/env.ts";
 import { ensureRoot } from "../core/store.ts";
 import { paths } from "../core/paths.ts";
@@ -72,27 +72,13 @@ async function shutdown(code: number): Promise<void> {
   process.exit(code);
 }
 
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
 async function acquireLock(): Promise<boolean> {
   const deadline = Date.now() + 4_000;
-  for (;;) {
-    if (await createExclusive(paths.lockFile(), `${process.pid}\n`)) return true;
-    const owner = Number((await readFile(paths.lockFile(), "utf8").catch(() => "")).trim());
-    if (!owner || !alive(owner)) {
-      await rm(paths.lockFile(), { force: true });
-      continue;
-    }
+  while (!(await tryLockFile(paths.lockFile(), (owner) => !processAlive(owner.pid)))) {
     if (Date.now() > deadline) return false;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  return true;
 }
 
 await ensureRoot();

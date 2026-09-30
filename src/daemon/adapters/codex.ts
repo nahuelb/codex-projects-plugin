@@ -232,10 +232,11 @@ export class CodexAdapter implements HarnessAdapter {
         const outcome = turn.status === "completed" ? "completed" : turn.status === "interrupted" ? "interrupted" : "failed";
         const finalText = [...(turn.items ?? [])].reverse().find((item: Json) => item.type === "agentMessage")?.text ?? state.lastMessage;
         const queued = state.queue.splice(0);
-        this.hooks.onTurnEnd(state.agentId, { outcome, message: String(finalText ?? ""), error: turn.error?.message, deliveredQueue: queued.length > 0 && outcome !== "interrupted" });
+        this.hooks.onTurnEnd(state.agentId, { outcome, message: String(finalText ?? ""), error: turn.error?.message });
         if (queued.length && outcome !== "interrupted") {
-          void this.startTurn(params.threadId, queued.join("\n\n")).catch((error) =>
-            this.hooks.onTurnEnd(state.agentId, { outcome: "failed", message: "", error: String(error.message ?? error) }),
+          void this.startTurn(params.threadId, queued.join("\n\n")).then(
+            () => this.hooks.onQueueDelivered(state.agentId, queued.length),
+            (error) => this.hooks.onTurnEnd(state.agentId, { outcome: "failed", message: "", error: String(error.message ?? error) }),
           );
         }
         return;

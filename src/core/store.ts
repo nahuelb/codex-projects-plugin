@@ -425,8 +425,20 @@ async function scopedPath(slug: string, scope: FileScope, relative: string): Pro
   const root = scope === "user" ? paths.user() : paths.project(slug);
   const file = await insideRootReal(root, relative);
   const first = path.relative(root, file).split(path.sep)[0] ?? "";
-  if (scope === "project" && HIDDEN_PROJECT_PATHS.has(first)) throw new Error(`${relative} is managed by Project Coordinator.`);
+  if (scope === "project" && (await isManagedEntry(root, first))) throw new Error(`${relative} is managed by Project Coordinator.`);
   return file;
+}
+
+async function isManagedEntry(root: string, first: string): Promise<boolean> {
+  const lower = first.toLowerCase();
+  if (HIDDEN_PROJECT_PATHS.has(lower) || lower.startsWith("project.json.")) return true;
+  const target = await stat(path.join(root, first)).catch(() => undefined);
+  if (!target) return false;
+  for (const name of HIDDEN_PROJECT_PATHS) {
+    const managed = await stat(path.join(root, name)).catch(() => undefined);
+    if (managed && managed.dev === target.dev && managed.ino === target.ino) return true;
+  }
+  return false;
 }
 
 export async function readScopedFile(slug: string, scope: FileScope, relative: string): Promise<ScopedFile> {

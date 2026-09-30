@@ -8,7 +8,6 @@ export interface TurnEnd {
   outcome: "completed" | "failed" | "interrupted";
   message: string;
   error?: string;
-  deliveredQueue?: boolean;
 }
 
 export interface AdapterHooks {
@@ -19,6 +18,7 @@ export interface AdapterHooks {
   onUsage(agentId: string, usage: AgentUsage): void;
   onWaiting(agentId: string, reason: string): void;
   onTurnEnd(agentId: string, end: TurnEnd): void;
+  onQueueDelivered(agentId: string, count: number): void;
 }
 
 export type SendResult = "started" | "steered" | "queued";

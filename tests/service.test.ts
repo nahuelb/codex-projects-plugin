@@ -169,3 +169,51 @@ test("follow-ups that would start a turn respect the working limit", async () =>
   await settle();
   await service.flush();
 });
+
+test("parallel follow-ups keep every queued message", async () => {
+  const project = await store.createProject({ name: "Queue Race" });
+  const agent = await service.start({ slug: project.slug, title: "Busy", task: "Work." });
+  await Promise.all([
+    service.send({ slug: project.slug, id: agent.id, text: "First." }),
+    service.send({ slug: project.slug, id: agent.id, text: "Second." }),
+  ]);
+  await service.flush();
+  assert.deepEqual((await store.getAgent(project.slug, agent.id)).queued, ["First.", "Second."]);
+  fake.hooks.onQueueDelivered(agentKey(agent), 1);
+  await service.flush();
+  assert.deepEqual((await store.getAgent(project.slug, agent.id)).queued, ["Second."]);
+  fake.finish(agent, "## Report\nDone.");
+  await settle();
+  await service.flush();
+});
+
+test("parallel follow-ups cannot pass the working limit together", async () => {
+  const { MAX_WORKING } = await import("../src/daemon/service.ts");
+  const project = await store.createProject({ name: "Slot Race" });
+  const idle: AgentRecord[] = [];
+  for (let index = 0; index < 2; index += 1) {
+    const agent = await service.start({ slug: project.slug, title: `Idle ${index}`, task: "Finish." });
+    fake.finish(agent, "## Report\nDone.");
+    idle.push(agent);
+  }
+  await settle();
+  const busy: AgentRecord[] = [];
+  while (fake.running.size < MAX_WORKING - 1) busy.push(await service.start({ slug: project.slug, title: `Busy ${busy.length}`, task: "Keep working." }));
+  const results = await Promise.allSettled(idle.map((agent) => service.send({ slug: project.slug, id: agent.id, text: "Go." })));
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  for (const agent of [...busy, ...idle]) if (fake.running.has(agentKey(agent))) fake.finish(agent, "## Report\nStopped.");
+  await settle();
+  await service.flush();
+});
+
+test("a report without a PR link keeps the PR from the previous report", async () => {
+  const project = await store.createProject({ name: "PR Keeper" });
+  const agent = await service.start({ slug: project.slug, title: "Open PR", task: "Open a PR." });
+  fake.finish(agent, "## Report\nOpened it.\nPR: https://github.com/acme/app/pull/7");
+  await settle();
+  await service.send({ slug: project.slug, id: agent.id, text: "Fix the typo." });
+  fake.finish(agent, "## Report\nFixed the typo.");
+  await settle();
+  await service.flush();
+  assert.equal((await store.getAgent(project.slug, agent.id)).report?.pr, "https://github.com/acme/app/pull/7");
+});
