@@ -2,7 +2,7 @@
 
 Project Coordinator is a Codex plugin inspired by Cursor Projects and Claude Code Projects. Each project gets a coordinator chat. It hands each task to a native Codex subagent, gives parallel code changes their own git worktree, tracks what needs you, and keeps notes and memory that every agent reads.
 
-![The coordinator chat answers "what needs me today?" beside the Coordinator panel](docs/images/coordinator-thread.png)
+[![Project Coordinator demo: the coordinator page, a coordinator chat that starts two subagents, the Subagents tab, and the board](docs/images/demo-video.png)](docs/demo.mp4)
 
 The prompts and code are original. See [docs/design.md](docs/design.md) for how each pattern maps here and what is not built yet.
 
@@ -44,7 +44,7 @@ To update, pull and run `npm run install:local` again, then restart Codex. To re
 
 ## Try the demo
 
-The screenshots above use a demo project, Pantry 2.0 Launch, for a fictional meal-planning app. To explore it without touching your own data:
+The video and screenshots above use a demo project, Pantry 2.0 Launch, for a fictional meal-planning app. To explore it without touching your own data:
 
 ```sh
 node scripts/demo.ts ~/pantry-demo
