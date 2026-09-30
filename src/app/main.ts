@@ -1,17 +1,29 @@
 import { App, applyDocumentTheme, applyHostFonts, applyHostStyleVariables, type McpUiHostContext } from "@modelcontextprotocol/ext-apps";
 import { OpenAIExtensions } from "@openai/mcp-extensions/app";
-import type { AgentGroup, AgentView, FileNode, ModelOption, ProjectDetail, ProjectIcon, ProjectColor, ProjectSummary, Snapshot, TranscriptItem } from "../shared/types.ts";
+import type { AgentGroup, AgentView, FileNode, FileScope, ModelOption, ProjectDetail, ProjectIcon, ProjectColor, ProjectSummary, Snapshot, TranscriptItem } from "../shared/types.ts";
 import { PROJECT_COLORS, PROJECT_ICONS } from "../shared/types.ts";
 import { icon } from "./icons.ts";
 import { escapeHtml, inline, markdown } from "./markdown.ts";
 
 type Mode = "home" | "panel";
-type Page = { kind: "project" } | { kind: "agent"; id: string } | { kind: "file"; scope: "project" | "user"; path: string; text: string } | { kind: "settings" } | { kind: "pick" };
+interface FilePage {
+  kind: "file";
+  scope: FileScope;
+  path: string;
+  text: string;
+  updatedAt: string;
+  view: "preview" | "source";
+  draft?: string;
+  tooLarge?: boolean;
+}
+
+type Page = { kind: "project" } | { kind: "agent"; id: string } | FilePage | { kind: "settings" } | { kind: "pick" };
 
 interface Host {
   call(name: string, args?: Record<string, unknown>): Promise<Record<string, any>>;
   openLink(url: string): Promise<boolean>;
   message(text: string, target: "new" | "active"): Promise<boolean>;
+  openFile(path: string): Promise<boolean>;
   fullscreen(): Promise<boolean>;
 }
 
@@ -52,6 +64,24 @@ interface State {
   openDetails: Set<string>;
   toast?: { text: string; kind: "ok" | "error" };
   pending: boolean;
+  listWidth: number;
+}
+
+const LIST_WIDTH_KEY = "coordinator.listWidth";
+const LIST_WIDTH_MIN = 200;
+const LIST_WIDTH_MAX = 420;
+
+function clampListWidth(value: number): number {
+  return Math.round(Math.min(LIST_WIDTH_MAX, Math.max(LIST_WIDTH_MIN, value)));
+}
+
+function storedListWidth(): number {
+  try {
+    const value = Number(localStorage.getItem(LIST_WIDTH_KEY));
+    return value ? clampListWidth(value) : 260;
+  } catch {
+    return 260;
+  }
 }
 
 const state: State = {
@@ -59,13 +89,14 @@ const state: State = {
   page: { kind: "project" },
   menu: false,
   filter: "",
-  selected: false,
-  expandedDirs: new Set(["project:memory"]),
-  collapsed: new Set(["files", "resolved"]),
+  selected: true,
+  expandedDirs: new Set(["root:project", "root:user"]),
+  collapsed: new Set(["resolved"]),
   steer: false,
   drafts: {},
   openDetails: new Set(),
   pending: false,
+  listWidth: storedListWidth(),
 };
 
 const GROUPS: { id: AgentGroup; label: string }[] = [
@@ -222,7 +253,7 @@ function memoryBlock(detail: ProjectDetail): string {
   return `<section class="block">${sectionHead("memory", "Memory", detail.memory.length)}${collapsed ? "" : `<div class="rows">${rows}</div>`}</section>`;
 }
 
-function fileTree(nodes: FileNode[], scope: "project" | "user", depth: number): string {
+function fileTree(nodes: FileNode[], scope: FileScope, depth: number): string {
   return nodes
     .map((node) => {
       const key = `${scope}:${node.path}`;
@@ -230,19 +261,21 @@ function fileTree(nodes: FileNode[], scope: "project" | "user", depth: number): 
         const open = state.expandedDirs.has(key);
         return `<button class="tree-row" style="--depth:${depth}" data-action="toggle-dir" data-key="${escapeHtml(key)}">${icon(open ? "folderOpen" : "folder", 15, "row-icon")}<span class="tree-name">${escapeHtml(node.name)}</span><span class="tree-date">${when(node.updatedAt)}</span></button>${open ? fileTree(node.children ?? [], scope, depth + 1) : ""}`;
       }
-      return `<button class="tree-row" style="--depth:${depth}" data-action="open-file" data-scope="${scope}" data-path="${escapeHtml(node.path)}">${icon("file", 15, "row-icon")}<span class="tree-name">${escapeHtml(node.name)}</span><span class="tree-date">${when(node.updatedAt)}</span></button>`;
+      return `<button class="tree-row" style="--depth:${depth}" data-action="open-file" data-scope="${scope}" data-path="${escapeHtml(node.path)}" title="${escapeHtml(node.path)}">${icon("file", 15, "row-icon")}<span class="tree-name">${escapeHtml(node.name)}</span><span class="tree-date">${when(node.updatedAt)}</span></button>`;
     })
     .join("");
 }
 
+function treeRoot(scope: FileScope, label: string, nodes: FileNode[]): string {
+  const key = `root:${scope}`;
+  const open = state.expandedDirs.has(key);
+  const children = nodes.length ? fileTree(nodes, scope, 1) : `<div class="tree-empty" style="--depth:1">No files yet</div>`;
+  return `<button class="tree-row" style="--depth:0" data-action="toggle-dir" data-key="${key}">${icon(open ? "folderOpen" : "folder", 15, "row-icon")}<span class="tree-name">${label}</span></button>${open ? children : ""}`;
+}
+
 function filesBlock(detail: ProjectDetail): string {
   const collapsed = state.collapsed.has("files");
-  const projectOpen = state.expandedDirs.has("root:project");
-  const userOpen = state.expandedDirs.has("root:user");
-  const tree = `<div class="tree">
-    <button class="tree-row" style="--depth:0" data-action="toggle-dir" data-key="root:project">${icon(projectOpen ? "folderOpen" : "folder", 15, "row-icon")}<span class="tree-name">Project</span></button>${projectOpen ? fileTree(detail.files.project, "project", 1) : ""}
-    <button class="tree-row" style="--depth:0" data-action="toggle-dir" data-key="root:user">${icon(userOpen ? "folderOpen" : "folder", 15, "row-icon")}<span class="tree-name">User</span></button>${userOpen ? fileTree(detail.files.user, "user", 1) : ""}
-  </div>`;
+  const tree = `<div class="tree">${treeRoot("project", "Project", detail.files.project)}${treeRoot("user", "User", detail.files.user)}</div>`;
   return `<section class="block">${sectionHead("files", "All Files")}${collapsed ? "" : tree}</section>`;
 }
 
@@ -307,9 +340,36 @@ function agentPage(agent: AgentView): string {
     </form>`}`;
 }
 
-function filePage(page: Extract<Page, { kind: "file" }>): string {
-  const name = page.path.split("/").pop() ?? page.path;
-  return `${subHeader(`<span class="muted">${page.scope === "user" ? "User" : "Project"} /</span> ${escapeHtml(name)}`)}<div class="md file-body">${page.path.endsWith(".md") ? markdown(page.text) : `<pre><code>${escapeHtml(page.text)}</code></pre>`}</div>`;
+function fileCrumbs(page: FilePage): string {
+  const parts = page.path.split("/").filter(Boolean);
+  const name = parts.pop() ?? page.path;
+  const trail = [page.scope === "user" ? "User" : "Project", ...parts].map((part) => `<span class="crumb">${escapeHtml(part)}</span><span class="crumb-sep">/</span>`).join("");
+  return `<span class="crumbs">${trail}<span class="crumb current">${escapeHtml(name)}</span></span>`;
+}
+
+function isDirty(page: FilePage): boolean {
+  return page.draft !== undefined && page.draft !== page.text;
+}
+
+function filePage(page: FilePage): string {
+  const dirty = isDirty(page);
+  const segment = (view: FilePage["view"], label: string) => `<button class="seg ${page.view === view ? "on" : ""}" data-action="file-view" data-view="${view}">${label}</button>`;
+  const markdownFile = /\.(md|markdown|mdx)$/i.test(page.path);
+  const bar = `<div class="file-bar">
+    <button class="icon-btn" data-action="back" title="Back">${icon("chevronLeft", 15)}</button>
+    ${fileCrumbs(page)}${dirty ? `<span class="dirty-dot" title="Unsaved changes"></span>` : ""}
+    <span class="file-tools">
+      ${markdownFile && !page.tooLarge ? `<span class="segmented">${segment("preview", "Preview")}${segment("source", "Source")}</span>` : ""}
+      ${dirty ? `<button class="btn small ghost" data-action="file-discard">Discard</button><button class="btn small primary" data-action="file-save">Save</button>` : ""}
+    </span>
+  </div>`;
+  if (page.tooLarge) return `${bar}<div class="empty"><div class="empty-title">This file is too large to show here</div></div>`;
+  const text = page.draft ?? page.text;
+  const body =
+    markdownFile && page.view === "preview"
+      ? `<article class="md doc">${text.trim() ? markdown(text, { frontmatter: true }) : `<p class="muted">Empty file. Switch to Source to write it.</p>`}</article>`
+      : `<textarea class="source" data-bind="file-draft" spellcheck="false">${escapeHtml(text)}</textarea>`;
+  return `${bar}<div class="file-body">${body}</div>`;
 }
 
 function settingsPage(detail: ProjectDetail): string {
@@ -481,7 +541,7 @@ function homeView(): string {
     .filter(([, members]) => members.length)
     .map(([label, members]) => `<div class="plabel">${label}</div>${members.map((project) => projectRow(project, project.slug === detail?.project.slug && state.selected)).join("")}`)
     .join("");
-  const list = `<aside class="plist">
+  const list = `<aside class="plist"><div class="plist-resize" data-drag="plist" title="Drag to resize"></div>
     <div class="plist-top"><label class="search-pill">${icon("search", 15)}<input data-bind="filter" value="${escapeHtml(state.filter)}" placeholder="Search projects" autocomplete="off"></label><button class="icon-btn" data-action="new-project" title="New Project">${icon("plus", 16)}</button></div>
     <div class="plist-rows">${sections || `<div class="plabel">${snapshot.projects.length ? "No matches" : "No projects yet"}</div>`}</div>
   </aside>`;
@@ -508,12 +568,13 @@ function homeView(): string {
         : "";
     main = `${head}<div class="pdetail-body">${body}</div>`;
   }
-  return `<div class="home">${list}<main class="pdetail">${main}</main></div>`;
+  return `<div class="home" style="--plist-w:${state.listWidth}px">${list}<main class="pdetail">${main}</main></div>`;
 }
 
-const SCROLLERS = [".panel-body", ".pdetail-body", ".plist-rows", ".transcript"];
+const SCROLLERS = [".panel-body", ".pdetail-body", ".plist-rows", ".transcript", ".source"];
 
 function render(): void {
+  if (root.querySelector(".home.resizing")) return;
   if (!state.snapshot) {
     root.innerHTML = `<div class="loading"><span class="spinner"></span></div>`;
     return;
@@ -569,6 +630,53 @@ function openSettings(detail: ProjectDetail): void {
   state.dropdown = undefined;
   render();
   void loadOptions();
+}
+
+function absolutePath(detail: ProjectDetail, scope: FileScope, relative: string): string {
+  return `${detail.files.roots[scope]}/${relative.replace(/^\.?\//, "")}`;
+}
+
+function scopeOf(detail: ProjectDetail, target: string): { scope: FileScope; path: string } | undefined {
+  for (const scope of ["project", "user"] as FileScope[]) {
+    const root = detail.files.roots[scope] + "/";
+    if (target.startsWith(root)) return { scope, path: target.slice(root.length) };
+  }
+  if (!target.startsWith("/")) return { scope: "project", path: target.replace(/^\.?\//, "") };
+  return undefined;
+}
+
+async function openFile(detail: ProjectDetail, scope: FileScope, relative: string): Promise<void> {
+  if (state.page.kind === "file" && isDirty(state.page) && !confirm("Discard unsaved changes?")) return;
+  if (await host.openFile(absolutePath(detail, scope, relative))) return;
+  return run(async () => {
+    const result = await host.call("ui_file", { project: detail.project.slug, scope, path: relative });
+    const file = result.file;
+    state.page = { kind: "file", scope, path: relative, text: file.text, updatedAt: file.updatedAt, view: "preview", tooLarge: file.tooLarge };
+  });
+}
+
+async function openLinkedFile(target: string): Promise<void> {
+  const detail = current();
+  if (!detail) return;
+  const scoped = scopeOf(detail, target);
+  if (scoped) return openFile(detail, scoped.scope, scoped.path);
+  if (!(await host.openFile(target))) toast("Could not open that file here.", "error");
+}
+
+async function saveFile(): Promise<void> {
+  const detail = current();
+  const page = state.page;
+  if (!detail || page.kind !== "file" || page.draft === undefined) return;
+  const text = page.draft;
+  return run(async () => {
+    const result = await host.call("ui_file_write", { project: detail.project.slug, scope: page.scope, path: page.path, text, expectedUpdatedAt: page.updatedAt });
+    state.snapshot = result.snapshot;
+    if (state.page === page) {
+      page.text = result.file.text;
+      page.updatedAt = result.file.updatedAt;
+      page.draft = undefined;
+    }
+  }, "Saved");
 }
 
 async function openCoordinator(slug: string): Promise<void> {
@@ -642,6 +750,7 @@ async function onAction(target: HTMLElement): Promise<void> {
         if (state.snapshot.current) openSettings(state.snapshot.current);
       });
     case "back":
+      if (state.page.kind === "file" && isDirty(state.page) && !confirm("Discard unsaved changes?")) return;
       state.page = { kind: "project" };
       state.transcript = undefined;
       state.settings = undefined;
@@ -666,13 +775,21 @@ async function onAction(target: HTMLElement): Promise<void> {
       return render();
     case "open-file": {
       if (!detail) return;
-      const scope = (target.dataset.scope as "project" | "user") ?? "project";
-      const path = target.dataset.path!;
-      return run(async () => {
-        const result = await host.call("ui_file", { project: detail.project.slug, scope, path });
-        state.page = { kind: "file", scope, path, text: result.file.text };
-      });
+      const scope = (target.dataset.scope as FileScope) ?? "project";
+      return openFile(detail, scope, target.dataset.path!);
     }
+    case "file-view": {
+      if (state.page.kind !== "file") return;
+      state.page.view = target.dataset.view as FilePage["view"];
+      return render();
+    }
+    case "file-discard": {
+      if (state.page.kind !== "file") return;
+      state.page.draft = undefined;
+      return render();
+    }
+    case "file-save":
+      return saveFile();
     case "chat-here":
       if (!detail) return;
       return run(async () => {
@@ -818,18 +935,48 @@ root.addEventListener("click", (event) => {
   if (anchor) {
     event.preventDefault();
     if (anchor.dataset.link) void host.openLink(anchor.dataset.link);
-    else if (anchor.dataset.file) {
-      const fake = document.createElement("button");
-      fake.dataset.action = "open-file";
-      fake.dataset.scope = "project";
-      fake.dataset.path = anchor.dataset.file.replace(/^\.\//, "");
-      void onAction(fake);
-    }
+    else if (anchor.dataset.file) void openLinkedFile(anchor.dataset.file);
     return;
   }
   const target = element.closest<HTMLElement>("[data-action]");
   if (!target || target.tagName === "FORM") return;
   void onAction(target);
+});
+
+root.addEventListener("pointerdown", (event) => {
+  const handle = (event.target as HTMLElement).closest<HTMLElement>("[data-drag='plist']");
+  const home = root.querySelector<HTMLElement>(".home");
+  if (!handle || !home) return;
+  event.preventDefault();
+  handle.setPointerCapture(event.pointerId);
+  const startX = event.clientX;
+  const startWidth = state.listWidth;
+  home.classList.add("resizing");
+  const move = (next: PointerEvent) => {
+    state.listWidth = clampListWidth(startWidth + next.clientX - startX);
+    home.style.setProperty("--plist-w", `${state.listWidth}px`);
+  };
+  const stop = () => {
+    home.classList.remove("resizing");
+    handle.removeEventListener("pointermove", move);
+    handle.removeEventListener("pointerup", stop);
+    handle.removeEventListener("pointercancel", stop);
+    try {
+      localStorage.setItem(LIST_WIDTH_KEY, String(state.listWidth));
+    } catch {}
+  };
+  handle.addEventListener("pointermove", move);
+  handle.addEventListener("pointerup", stop);
+  handle.addEventListener("pointercancel", stop);
+});
+
+root.addEventListener("dblclick", (event) => {
+  if (!(event.target as HTMLElement).closest("[data-drag='plist']")) return;
+  state.listWidth = 260;
+  try {
+    localStorage.removeItem(LIST_WIDTH_KEY);
+  } catch {}
+  render();
 });
 
 root.addEventListener("submit", (event) => {
@@ -848,6 +995,12 @@ root.addEventListener("input", (event) => {
     const input = root.querySelector<HTMLInputElement>("[data-bind='filter']");
     input?.focus();
     if (position != null) input?.setSelectionRange(position, position);
+    return;
+  }
+  if (bind === "file-draft" && state.page.kind === "file") {
+    const wasDirty = isDirty(state.page);
+    state.page.draft = field.value;
+    if (wasDirty !== isDirty(state.page)) refreshFileBar();
     return;
   }
   if (bind === "name" && state.create) state.create.name = field.value;
@@ -870,8 +1023,22 @@ root.addEventListener("toggle", (event) => {
   else state.openDetails.delete(key);
 }, true);
 
+function refreshFileBar(): void {
+  if (state.page.kind !== "file") return;
+  const bar = root.querySelector(".file-bar");
+  const holder = document.createElement("div");
+  holder.innerHTML = filePage(state.page);
+  const next = holder.querySelector(".file-bar");
+  if (bar && next) bar.replaceWith(next);
+}
+
 root.addEventListener("keydown", (event) => {
   const target = event.target as HTMLElement;
+  if (event.key === "s" && (event.metaKey || event.ctrlKey) && state.page.kind === "file") {
+    event.preventDefault();
+    void saveFile();
+    return;
+  }
   if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && target.tagName === "TEXTAREA") {
     event.preventDefault();
     target.closest("form")?.requestSubmit();
@@ -880,6 +1047,7 @@ root.addEventListener("keydown", (event) => {
     if (state.dropdown) state.dropdown = undefined;
     else if (state.create) state.create = undefined;
     else if (state.menu) state.menu = false;
+    else if (state.page.kind === "file" && isDirty(state.page)) return;
     else if (state.page.kind !== "project") {
       state.page = { kind: "project" };
       state.settings = undefined;
@@ -942,6 +1110,16 @@ function connectMcpHost(): Host {
         return false;
       }
     },
+    async openFile(path) {
+      await connected;
+      if (!extensions.files) return false;
+      try {
+        await extensions.files.open(path);
+        return true;
+      } catch {
+        return false;
+      }
+    },
     async fullscreen() {
       await connected;
       try {
@@ -967,7 +1145,7 @@ function connectPreviewHost(): Host {
     return Promise.resolve(true);
   };
   void call(state.mode === "home" ? "coordinator_home" : "project_panel").then(handleContent);
-  return { call, openLink: (url) => note("open", url), message: (text, target) => note(`message (${target})`, text), fullscreen: async () => false };
+  return { call, openLink: (url) => note("open", url), message: (text, target) => note(`message (${target})`, text), openFile: async () => false, fullscreen: async () => false };
 }
 
 host = window.parent !== window ? connectMcpHost() : connectPreviewHost();

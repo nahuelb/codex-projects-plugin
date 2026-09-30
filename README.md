@@ -9,6 +9,7 @@ The prompts and code are original. See [docs/design.md](docs/design.md) for how 
 - **Create Project.** Pick an icon, a name, a workspace, and a model. Project Coordinator starts the project's coordinator chat for you.
 - **A Project Coordinator page in the Codex sidebar.** A project list like Code Review, each project's notes, agents, memory, and files, and the page's own chat as the coordinator. Coordinator chats are named after their project.
 - **A Project panel beside the chat.** Notes, agents grouped by *Needs you*, *Ready for review*, *Working*, and *Idle*, memory, and all files, in one scrolling panel.
+- **Project files in Codex tabs.** All Files lists the project's plans, docs, notes, and memory. A file opens in a Codex file tab, where you can read and edit it and save with ⌘S. The coordinator writes plans and documents with `file_write` and links them in chat and in `notes.md`.
 - **A coordinator skill (`$coordinator`).** The coordinator reads a project digest each turn, starts agents, forwards follow-ups, and keeps `notes.md` and memory current.
 - **Codex agents.** Agents run through `codex app-server` and show up as Codex chats. Each one gets a brief with the project instructions, memory, and its task, and ends each turn with a report: `## Report`, `## Next`, `## Needs you`, and `## Remember`.
 - **@-mention a project** in any chat to attach its current status.
@@ -65,7 +66,7 @@ Set `PROJECTS_COORDINATOR_HOME` to use another folder.
 - Codex agents run with the `workspace-write` sandbox, approval `never`, network on, and write access to their worktree and the repository's `.git` folder. Set `PROJECTS_CODEX_NETWORK=0` to turn network off.
 - PR follow-up needs `gh` signed in. It runs while the background service is up.
 - The plugin launches your own signed-in `codex` CLI. It never handles your credentials.
-- The Project Coordinator page, Project panel, quick action, mentions, and deep links use OpenAI's MCP extensions. Other MCP hosts show the plain MCP App, if they support MCP Apps.
+- The Project Coordinator page, Project panel, quick action, mentions, deep links, and file tabs use OpenAI's MCP extensions. Other MCP hosts show the plain MCP App, if they support MCP Apps. There, files open in a built-in viewer with Preview and Source modes.
 - Mobile needs a hosted endpoint and is not built yet.
 
 ## Development

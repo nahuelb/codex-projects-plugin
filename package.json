@@ -19,6 +19,7 @@
     "@modelcontextprotocol/ext-apps": "^1.7.5",
     "@modelcontextprotocol/sdk": "^1.31.0",
     "@openai/mcp-extensions": "^0.1.0",
+    "markdown-it": "^15.0.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {

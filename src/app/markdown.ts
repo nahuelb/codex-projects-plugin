@@ -1,80 +1,85 @@
+import MarkdownIt, { type Token } from "markdown-it";
+
 export function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 }
 
-export function inline(text: string): string {
-  let out = escapeHtml(text);
-  out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
-  out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  out = out.replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>");
-  out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" data-link="$2">$1</a>');
-  out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a data-file="$2">$1</a>');
-  out = out.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" data-link="$2">$2</a>');
-  return out;
+const md = new MarkdownIt({ html: false, linkify: true, breaks: false, typographer: false });
+
+const EXTERNAL = /^(https?:|mailto:)/i;
+
+function safeDecode(text: string): string {
+  try {
+    return decodeURI(text);
+  } catch {
+    return text;
+  }
 }
 
-export function markdown(source: string): string {
-  const lines = source.replace(/\r\n/g, "\n").split("\n");
-  const html: string[] = [];
-  let list: "ul" | "ol" | null = null;
-  let paragraph: string[] = [];
-  const closeParagraph = () => {
-    if (paragraph.length) html.push(`<p>${inline(paragraph.join(" "))}</p>`);
-    paragraph = [];
-  };
-  const closeList = () => {
-    if (list) html.push(`</${list}>`);
-    list = null;
-  };
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    const fence = /^```(\w*)/.exec(line);
-    if (fence) {
-      closeParagraph();
-      closeList();
-      const body: string[] = [];
-      for (index += 1; index < lines.length && !/^```/.test(lines[index]); index += 1) body.push(lines[index]);
-      html.push(`<pre><code>${escapeHtml(body.join("\n"))}</code></pre>`);
-      continue;
-    }
-    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
-    if (heading) {
-      closeParagraph();
-      closeList();
-      const level = Math.min(heading[1].length + 1, 6);
-      html.push(`<h${level}>${inline(heading[2])}</h${level}>`);
-      continue;
-    }
-    const task = /^\s*[-*]\s+\[([ xX])\]\s+(.+)$/.exec(line);
-    const bullet = /^\s*[-*]\s+(.+)$/.exec(line);
-    const numbered = /^\s*\d+[.)]\s+(.+)$/.exec(line);
-    if (task || bullet || numbered) {
-      closeParagraph();
-      const kind = numbered && !bullet ? "ol" : "ul";
-      if (list !== kind) {
-        closeList();
-        html.push(`<${kind}>`);
-        list = kind;
-      }
-      if (task) html.push(`<li class="task ${task[1].trim() ? "done" : ""}"><span class="box"></span>${inline(task[2])}</li>`);
-      else html.push(`<li>${inline((bullet ?? numbered)![1])}</li>`);
-      continue;
-    }
-    if (/^---+$/.test(line.trim())) {
-      closeParagraph();
-      closeList();
-      html.push("<hr>");
-      continue;
-    }
-    if (!line.trim()) {
-      closeParagraph();
-      closeList();
-      continue;
-    }
-    closeList();
-    paragraph.push(line.trim());
+md.renderer.rules.link_open = (tokens, index) => {
+  const href = String(tokens[index].attrGet("href") ?? "");
+  if (EXTERNAL.test(href)) return `<a href="${escapeHtml(href)}" data-link="${escapeHtml(href)}">`;
+  if (href.startsWith("#")) return `<a>`;
+  const target = safeDecode(href.replace(/^file:\/\//, ""));
+  return `<a class="file-link" data-file="${escapeHtml(target)}">`;
+};
+
+md.renderer.rules.fence = (tokens, index) => {
+  const token = tokens[index];
+  const lang = token.info.trim().split(/\s+/)[0];
+  return `<pre${lang ? ` data-lang="${escapeHtml(lang)}"` : ""}><code>${escapeHtml(token.content.replace(/\n$/, ""))}</code></pre>`;
+};
+
+md.renderer.rules.table_open = () => `<div class="table-wrap"><table>`;
+md.renderer.rules.table_close = () => `</table></div>`;
+
+function markTasks(tokens: Token[]): void {
+  for (let index = 2; index < tokens.length; index += 1) {
+    const inlineToken = tokens[index];
+    if (inlineToken.type !== "inline" || tokens[index - 1].type !== "paragraph_open" || tokens[index - 2].type !== "list_item_open") continue;
+    const match = /^\[([ xX])\]\s+/.exec(inlineToken.content);
+    if (!match) continue;
+    const done = match[1] !== " ";
+    const item = tokens[index - 2];
+    item.attrJoin("class", `task${done ? " done" : ""}`);
+    const first = inlineToken.children?.[0];
+    if (first?.type === "text") first.content = first.content.replace(/^\[([ xX])\]\s+/, "");
+    const box = new (inlineToken.constructor as typeof Token)("html_inline", "", 0);
+    box.content = `<span class="box" aria-hidden="true"></span>`;
+    inlineToken.children?.unshift(box);
   }
-  closeParagraph();
-  closeList();
-  return html.join("\n");
+}
+
+md.core.ruler.push("task_items", (state) => markTasks(state.tokens));
+
+export interface Frontmatter {
+  fields: [string, string][];
+  body: string;
+}
+
+export function splitFrontmatter(source: string): Frontmatter {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(source);
+  if (!match) return { fields: [], body: source };
+  const fields: [string, string][] = [];
+  for (const line of match[1].split(/\r?\n/)) {
+    const pair = /^([\w.-]+):\s*(.*)$/.exec(line);
+    if (pair) fields.push([pair[1], pair[2].replace(/^["']|["']$/g, "")]);
+  }
+  return { fields, body: source.slice(match[0].length) };
+}
+
+function frontmatterTable(fields: [string, string][]): string {
+  if (!fields.length) return "";
+  return `<div class="props">${fields.map(([key, value]) => `<div class="prop"><span class="prop-key">${escapeHtml(key)}</span><span class="prop-value">${escapeHtml(value)}</span></div>`).join("")}</div>`;
+}
+
+export function inline(text: string): string {
+  return md.renderInline(text);
+}
+
+export function markdown(source: string, options: { frontmatter?: boolean } = {}): string {
+  const normalized = source.replace(/\r\n/g, "\n").replace(/<\/?tldr>\n?/gi, "");
+  if (!options.frontmatter) return md.render(normalized);
+  const { fields, body } = splitFrontmatter(normalized);
+  return frontmatterTable(fields) + md.render(body);
 }

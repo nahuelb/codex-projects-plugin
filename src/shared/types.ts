@@ -131,7 +131,16 @@ export interface FileNode {
   path: string;
   kind: "file" | "dir";
   updatedAt: string;
+  size?: number;
   children?: FileNode[];
+}
+
+export type FileScope = "project" | "user";
+
+export interface ProjectFiles {
+  roots: Record<FileScope, string>;
+  project: FileNode[];
+  user: FileNode[];
 }
 
 export interface AgentView extends AgentRecord {
@@ -159,7 +168,7 @@ export interface ProjectDetail {
   agents: AgentView[];
   memory: MemoryEntry[];
   inbox: InboxItem[];
-  files: { project: FileNode[]; user: FileNode[] };
+  files: ProjectFiles;
 }
 
 export interface ModelOption {

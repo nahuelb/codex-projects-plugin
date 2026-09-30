@@ -1,4 +1,5 @@
 import type { AgentView } from "../shared/types.ts";
+import { paths } from "./paths.ts";
 import { GROUP_ORDER, projectDetail, readMemoryIndex, readPreferences } from "./store.ts";
 
 const GROUP_LABEL: Record<AgentView["group"], string> = {
@@ -47,6 +48,7 @@ export async function contextDigest(slug: string): Promise<string> {
   out.push(`Goal: ${project.goal || "(none set)"}`);
   out.push(`Repositories: ${project.repos.length ? project.repos.join(", ") : "(none)"}`);
   out.push(`Agent model: ${project.model ?? "Codex default"}${project.effort ? ` (${project.effort} effort)` : ""}`);
+  out.push(`Project folder: ${paths.project(slug)}`);
   out.push("");
   out.push("## Instructions");
   out.push(detail.instructions.trim() || "(none)");

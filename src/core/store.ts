@@ -8,6 +8,8 @@ import {
   type AgentRecord,
   type AgentView,
   type FileNode,
+  type ProjectFiles,
+  type FileScope,
   type InboxItem,
   type MemoryEntry,
   type ProjectColor,
@@ -310,6 +312,14 @@ export async function ackInbox(slug: string, ids: string[]): Promise<number> {
   return moved;
 }
 
+const BLANK_PROBE_BYTES = 512;
+
+async function isBlankFile(file: string, size: number): Promise<boolean> {
+  if (size === 0) return true;
+  if (size > BLANK_PROBE_BYTES) return false;
+  return !(await readText(file)).replace(/<\/?tldr>/gi, "").trim();
+}
+
 async function tree(root: string, relative: string, skip: Set<string>, depth: number): Promise<FileNode[]> {
   const dir = path.join(root, relative);
   if (!(await exists(dir))) return [];
@@ -317,11 +327,15 @@ async function tree(root: string, relative: string, skip: Set<string>, depth: nu
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     if (entry.name.startsWith(".") || skip.has(path.join(relative, entry.name))) continue;
     const rel = path.join(relative, entry.name);
-    const updatedAt = await mtimeIso(path.join(root, rel));
+    const full = path.join(root, rel);
     if (entry.isDirectory()) {
-      nodes.push({ name: entry.name, path: rel, kind: "dir", updatedAt, children: depth > 0 ? await tree(root, rel, skip, depth - 1) : [] });
+      const children = depth > 0 ? await tree(root, rel, skip, depth - 1) : [];
+      if (depth > 0 && !children.length) continue;
+      nodes.push({ name: entry.name, path: rel, kind: "dir", updatedAt: await mtimeIso(full), children });
     } else if (entry.isFile()) {
-      nodes.push({ name: entry.name, path: rel, kind: "file", updatedAt });
+      const info = await stat(full);
+      if (await isBlankFile(full, info.size)) continue;
+      nodes.push({ name: entry.name, path: rel, kind: "file", updatedAt: info.mtime.toISOString(), size: info.size });
     }
   }
   return nodes.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1));
@@ -329,20 +343,49 @@ async function tree(root: string, relative: string, skip: Set<string>, depth: nu
 
 const HIDDEN_PROJECT_PATHS = new Set(["project.json", "agents", "inbox", "work"]);
 
-export async function projectFiles(slug: string): Promise<{ project: FileNode[]; user: FileNode[] }> {
+export async function projectFiles(slug: string): Promise<ProjectFiles> {
   return {
-    project: await tree(paths.project(slug), "", HIDDEN_PROJECT_PATHS, 3),
-    user: await tree(paths.user(), "", new Set(), 3),
+    roots: { project: paths.project(slug), user: paths.user() },
+    project: await tree(paths.project(slug), "", HIDDEN_PROJECT_PATHS, 4),
+    user: await tree(paths.user(), "", new Set(), 4),
   };
 }
 
-export async function readScopedFile(slug: string, scope: "project" | "user", relative: string): Promise<{ text: string; path: string; size: number }> {
+export interface ScopedFile {
+  text: string;
+  path: string;
+  size: number;
+  updatedAt: string;
+  tooLarge?: boolean;
+}
+
+const MAX_EDITABLE_BYTES = 512 * 1024;
+
+function scopedPath(slug: string, scope: FileScope, relative: string): string {
   const root = scope === "user" ? paths.user() : paths.project(slug);
-  const file = insideRoot(root, relative);
+  const first = relative.split(/[\\/]/).filter(Boolean)[0] ?? "";
+  if (scope === "project" && HIDDEN_PROJECT_PATHS.has(first)) throw new Error(`${relative} is managed by Project Coordinator.`);
+  return insideRoot(root, relative);
+}
+
+export async function readScopedFile(slug: string, scope: FileScope, relative: string): Promise<ScopedFile> {
+  const file = scopedPath(slug, scope, relative);
   const info = await stat(file);
   if (!info.isFile()) throw new Error(`${relative} is not a file.`);
-  if (info.size > 512 * 1024) return { text: `File is ${Math.round(info.size / 1024)} KB, too large to preview.`, path: file, size: info.size };
-  return { text: await readText(file), path: file, size: info.size };
+  const base = { path: file, size: info.size, updatedAt: info.mtime.toISOString() };
+  if (info.size > MAX_EDITABLE_BYTES) return { ...base, text: "", tooLarge: true };
+  return { ...base, text: await readText(file) };
+}
+
+export async function writeScopedFile(slug: string, scope: FileScope, relative: string, text: string, expectedUpdatedAt?: string): Promise<ScopedFile> {
+  const file = scopedPath(slug, scope, relative);
+  if (Buffer.byteLength(text) > MAX_EDITABLE_BYTES) throw new Error("The file is too large to save here.");
+  if (expectedUpdatedAt && (await exists(file))) {
+    const current = (await stat(file)).mtime.toISOString();
+    if (current !== expectedUpdatedAt) throw new Error("The file changed on disk since you opened it. Reload it before you save.");
+  }
+  await writeTextAtomic(file, text);
+  return readScopedFile(slug, scope, relative);
 }
 
 export async function projectSummary(project: ProjectRecord): Promise<ProjectSummary> {

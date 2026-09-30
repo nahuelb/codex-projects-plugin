@@ -14,6 +14,7 @@ import {
   listProjects,
   projectSummary,
   readScopedFile,
+  writeScopedFile,
   resolveProject,
   updateProject,
   writeMemory,
@@ -378,6 +379,28 @@ export function registerTools(server: McpServer, html: string): void {
   );
 
   server.registerTool(
+    "file_write",
+    {
+      title: "Write project file",
+      description:
+        "Create or replace a Markdown file in the project folder: plans/ for plans the user should read, docs/ for lasting documents, internal/ for agent-only material. Returns the absolute path; link it as [title](absolute path) so the user can open it in Codex. Use notes_write and memory_write for notes.md and memory.",
+      inputSchema: z.object({
+        project: projectArg,
+        path: z.string().describe("Path inside the project folder, for example plans/rollout.md."),
+        content: z.string(),
+      }),
+      annotations: writes,
+    },
+    async ({ project, path: relative, content }) => {
+      const slug = (await resolveProject(project)).slug;
+      const clean = relative.replace(/^\.?\//, "");
+      if (clean === "notes.md" || clean === "MEMORY.md" || clean.startsWith("memory/")) throw new Error("Use notes_write or memory_write for that file.");
+      const file = await writeScopedFile(slug, "project", clean, content.trim() + "\n");
+      return text(`Saved ${clean}. Link: [${clean.split("/").pop()}](${file.path})`, { path: file.path });
+    },
+  );
+
+  server.registerTool(
     "memory_write",
     {
       title: "Write memory",
@@ -484,7 +507,21 @@ export function registerTools(server: McpServer, html: string): void {
     },
     async ({ project, scope, path }) => {
       const file = await readScopedFile(project, scope, path);
-      return text(file.text, { file });
+      return text(file.tooLarge ? "File is too large to show." : file.text, { file });
+    },
+  );
+
+  server.registerTool(
+    "ui_file_write",
+    {
+      title: "Save project file",
+      description: "App file editor save.",
+      inputSchema: z.object({ project: z.string(), scope: z.enum(["project", "user"]), path: z.string(), text: z.string(), expectedUpdatedAt: z.string().optional() }),
+      _meta: appOnly,
+    },
+    async ({ project, scope, path, text: body, expectedUpdatedAt }) => {
+      const file = await writeScopedFile(project, scope, path, body, expectedUpdatedAt);
+      return text(`Saved ${path}.`, { file, snapshot: await snapshot(project) });
     },
   );
 

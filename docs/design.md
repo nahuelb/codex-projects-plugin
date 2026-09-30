@@ -20,6 +20,7 @@ How Project Coordinator brings the ideas of Cursor Projects and Claude Code Proj
 | Per-turn policy that survives compaction | Cursor (prompt re-sent every turn) | `project_context` digest ending with coordinator reminders |
 | Worker reports with next actions | Cursor, Claude | Report contract: `PR:`, `## Report`, `## Next`, `## Needs you`, `## Remember` |
 | PR follow-up: failing checks and review comments go back to the worker | Claude (auto-fix), Cursor (PR subscriptions) | The background service polls `gh` every 2 minutes and queues a follow-up |
+| Project files the user reads and edits: plans, docs, notes, memory | Cursor (All Files, file tabs with Preview and Source) | All Files opens each file in a Codex file tab through `openai/files/open`; the coordinator writes `plans/` and `docs/` with `file_write` and links absolute paths |
 | Setup pass that explores repositories before work starts | Claude (automatic setup) | Skill offers a read-only exploration agent on the first turn |
 | Concurrency limit | Claude (daily thread cap) | At most 10 working agents (`PROJECTS_MAX_WORKING`) |
 

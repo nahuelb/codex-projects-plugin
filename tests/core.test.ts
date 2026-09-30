@@ -94,3 +94,29 @@ test("createWorktree makes a branch and folder per agent", async () => {
   assert.equal(worktree.branch, "project/demo/a-001-cache-the-users-endpoint");
   assert.equal(execFileSync("git", ["-C", worktree.cwd, "branch", "--show-current"]).toString().trim(), worktree.branch);
 });
+
+test("the file tree hides blank files and empty folders", async () => {
+  const project = await store.createProject({ name: "Files Tree", repos: [] });
+  const tree = await store.projectFiles(project.slug);
+  const names = tree.project.map((node) => node.name);
+  assert.ok(!names.includes("notes.md"));
+  assert.ok(!names.includes("MEMORY.md"));
+  assert.ok(!names.includes("docs"));
+  assert.equal(tree.roots.project, paths.project(project.slug));
+  await store.writeScopedFile(project.slug, "project", "plans/rollout.md", "# Rollout\n");
+  const after = await store.projectFiles(project.slug);
+  const plans = after.project.find((node) => node.name === "plans");
+  assert.deepEqual(plans?.children?.map((node) => node.name), ["rollout.md"]);
+});
+
+test("scoped file writes refuse stale edits and managed paths", async () => {
+  const project = await store.createProject({ name: "Files Write", repos: [] });
+  const first = await store.writeScopedFile(project.slug, "project", "docs/a.md", "one\n");
+  const second = await store.writeScopedFile(project.slug, "project", "docs/a.md", "two\n", first.updatedAt);
+  assert.equal(second.text, "two\n");
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  await store.writeScopedFile(project.slug, "project", "docs/a.md", "three\n");
+  await assert.rejects(store.writeScopedFile(project.slug, "project", "docs/a.md", "stale\n", second.updatedAt), /changed on disk/);
+  await assert.rejects(store.writeScopedFile(project.slug, "project", "project.json", "{}"), /managed/);
+  await assert.rejects(store.writeScopedFile(project.slug, "project", "../x.md", "x"), /escapes/);
+});
