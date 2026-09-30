@@ -212,12 +212,13 @@ pre code { background: none; padding: 0; }
 
 /* side panel: the Cursor-style Project panel */
 .panel { display: flex; flex-direction: column; min-height: 100vh; }
+body.fullscreen .panel { height: 100vh; min-height: 0; }
 body:not(.fullscreen) .panel { min-height: 0; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 22px 18px 14px 22px; position: relative; }
 .ph-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .ph-title h1 { font-size: 18px; line-height: 24px; font-weight: 600; color: color-mix(in oklab, var(--fg) 92%, transparent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ph-actions { display: flex; gap: 2px; flex: none; }
-.panel-body { flex: 1; padding: 0 14px 24px; overflow: auto; }
+.panel-body { flex: 1; min-height: 0; padding: 0 14px 24px; overflow: auto; }
 .subhead { display: flex; align-items: center; gap: 6px; padding: 14px 0 10px; }
 .subhead-title { font-size: var(--text-sm); color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .menu { position: absolute; z-index: 10; top: 58px; right: 14px; width: 260px; max-height: 380px; overflow: auto; background: var(--elevated); border: 1px solid var(--border); border-radius: var(--r-xl); box-shadow: var(--shadow); padding: 5px; }
