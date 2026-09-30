@@ -7,27 +7,43 @@ export function rootDir(): string {
   return override ? path.resolve(override) : path.join(os.homedir(), ".projects-coordinator");
 }
 
+const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
+const AGENT_ID_PATTERN = /^a-\d{3,6}$/;
+
+export function checkSlug(slug: string): string {
+  if (!SLUG_PATTERN.test(slug)) throw new Error(`Not a project id: ${JSON.stringify(slug)}`);
+  return slug;
+}
+
+export function checkAgentId(id: string): string {
+  if (!AGENT_ID_PATTERN.test(id)) throw new Error(`Not an agent id: ${JSON.stringify(id)}`);
+  return id;
+}
+
+const projectDir = (slug: string) => path.join(rootDir(), "projects", checkSlug(slug));
+
 export const paths = {
   root: () => rootDir(),
   projects: () => path.join(rootDir(), "projects"),
-  project: (slug: string) => path.join(rootDir(), "projects", slug),
-  projectJson: (slug: string) => path.join(rootDir(), "projects", slug, "project.json"),
-  instructions: (slug: string) => path.join(rootDir(), "projects", slug, "INSTRUCTIONS.md"),
-  notes: (slug: string) => path.join(rootDir(), "projects", slug, "notes.md"),
-  memoryIndex: (slug: string) => path.join(rootDir(), "projects", slug, "MEMORY.md"),
-  memoryDir: (slug: string) => path.join(rootDir(), "projects", slug, "memory"),
-  agentsDir: (slug: string) => path.join(rootDir(), "projects", slug, "agents"),
-  agentJson: (slug: string, id: string) => path.join(rootDir(), "projects", slug, "agents", `${id}.json`),
-  agentDir: (slug: string, id: string) => path.join(rootDir(), "projects", slug, "agents", id),
-  inboxDir: (slug: string) => path.join(rootDir(), "projects", slug, "inbox"),
-  inboxDoneDir: (slug: string) => path.join(rootDir(), "projects", slug, "inbox", "done"),
-  workDir: (slug: string, id: string) => path.join(rootDir(), "projects", slug, "work", id),
-  worktreesDir: (slug: string) => path.join(rootDir(), "worktrees", slug),
+  project: (slug: string) => projectDir(slug),
+  projectJson: (slug: string) => path.join(projectDir(slug), "project.json"),
+  instructions: (slug: string) => path.join(projectDir(slug), "INSTRUCTIONS.md"),
+  notes: (slug: string) => path.join(projectDir(slug), "notes.md"),
+  memoryIndex: (slug: string) => path.join(projectDir(slug), "MEMORY.md"),
+  memoryDir: (slug: string) => path.join(projectDir(slug), "memory"),
+  agentsDir: (slug: string) => path.join(projectDir(slug), "agents"),
+  agentJson: (slug: string, id: string) => path.join(projectDir(slug), "agents", `${checkAgentId(id)}.json`),
+  agentDir: (slug: string, id: string) => path.join(projectDir(slug), "agents", checkAgentId(id)),
+  inboxDir: (slug: string) => path.join(projectDir(slug), "inbox"),
+  inboxDoneDir: (slug: string) => path.join(projectDir(slug), "inbox", "done"),
+  workDir: (slug: string, id: string) => path.join(projectDir(slug), "work", checkAgentId(id)),
+  worktreesDir: (slug: string) => path.join(rootDir(), "worktrees", checkSlug(slug)),
   user: () => path.join(rootDir(), "user"),
   preferences: () => path.join(rootDir(), "user", "preferences.md"),
   run: () => path.join(rootDir(), "run"),
   socket: () => socketPath(),
   pidFile: () => path.join(rootDir(), "run", "coordd.pid"),
+  lockFile: () => path.join(rootDir(), "run", "coordd.lock"),
   daemonLog: () => path.join(rootDir(), "run", "coordd.log"),
 };
 

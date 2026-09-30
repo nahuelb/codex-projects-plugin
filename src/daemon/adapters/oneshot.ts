@@ -16,6 +16,11 @@ export async function withAppServer<T>(binary: string, version: string, work: (c
     }
     pending.clear();
   };
+  const exited = new Promise<void>((resolve) => {
+    child.once("exit", () => resolve());
+    child.once("error", () => resolve());
+  });
+  child.stderr.resume();
   child.on("error", fail);
   child.on("exit", (code) => fail(new Error(`Codex app-server exited (${code ?? "signal"}).`)));
   readline.createInterface({ input: child.stdout }).on("line", (line) => {
@@ -48,5 +53,8 @@ export async function withAppServer<T>(binary: string, version: string, work: (c
     return await work(call);
   } finally {
     child.kill();
+    const forced = setTimeout(() => child.kill("SIGKILL"), 3_000);
+    await exited;
+    clearTimeout(forced);
   }
 }

@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile, stat } from "node:fs/promises";
+import { mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 
@@ -49,13 +49,80 @@ export async function mtimeIso(file: string): Promise<string> {
   }
 }
 
-export function insideRoot(root: string, relative: string): string {
-  const resolved = path.resolve(root, relative);
-  const normalizedRoot = path.resolve(root);
-  if (resolved !== normalizedRoot && !resolved.startsWith(normalizedRoot + path.sep)) {
-    throw new Error(`Path escapes its folder: ${relative}`);
+function contains(root: string, target: string): boolean {
+  return target === root || target.startsWith(root + path.sep);
+}
+
+async function realpathOfNearest(target: string): Promise<string> {
+  const missing: string[] = [];
+  let current = target;
+  for (;;) {
+    try {
+      return path.join(await realpath(current), ...missing.reverse());
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const parent = path.dirname(current);
+      if (parent === current) return target;
+      missing.push(path.basename(current));
+      current = parent;
+    }
   }
+}
+
+export function insideRoot(root: string, relative: string): string {
+  const normalizedRoot = path.resolve(root);
+  const resolved = path.resolve(normalizedRoot, relative);
+  if (!contains(normalizedRoot, resolved)) throw new Error(`Path escapes its folder: ${relative}`);
   return resolved;
+}
+
+export async function insideRootReal(root: string, relative: string): Promise<string> {
+  const resolved = insideRoot(root, relative);
+  const realRoot = await realpathOfNearest(path.resolve(root));
+  const realTarget = await realpathOfNearest(resolved);
+  if (!contains(realRoot, realTarget)) throw new Error(`Path escapes its folder through a link: ${relative}`);
+  return resolved;
+}
+
+const LOCK_STALE_MS = 15_000;
+const LOCK_WAIT_MS = 5_000;
+
+export async function withFileLock<T>(file: string, work: () => Promise<T>): Promise<T> {
+  const lock = `${file}.lock`;
+  await ensureDir(path.dirname(file));
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      const handle = await open(lock, "wx");
+      await handle.writeFile(String(process.pid));
+      await handle.close();
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const age = await stat(lock).then((info) => Date.now() - info.mtimeMs, () => 0);
+      if (age > LOCK_STALE_MS) await rm(lock, { force: true });
+      else if (Date.now() > deadline) throw new Error(`Timed out waiting for ${path.basename(file)}.`);
+      else await new Promise((resolve) => setTimeout(resolve, 20 + Math.random() * 40));
+    }
+  }
+  try {
+    return await work();
+  } finally {
+    await rm(lock, { force: true });
+  }
+}
+
+export async function createExclusive(file: string, text: string): Promise<boolean> {
+  await ensureDir(path.dirname(file));
+  try {
+    const handle = await open(file, "wx");
+    await handle.writeFile(text);
+    await handle.close();
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw error;
+  }
 }
 
 export function slugify(text: string, max = 40): string {

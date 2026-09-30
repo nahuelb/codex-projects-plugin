@@ -89,6 +89,8 @@ export interface AgentRecord {
   turns: number;
   usage?: AgentUsage;
   followUps: AgentFollowUp[];
+  queued?: string[];
+  deferred?: string[];
   pr?: PullRequestStatus;
 }
 

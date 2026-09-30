@@ -51,11 +51,27 @@ function listItems(body: string | undefined): string[] {
     .filter((item): item is string => Boolean(item) && !/^none\.?$/i.test(item as string));
 }
 
+function withoutFences(text: string): string {
+  let fence: string | undefined;
+  return text
+    .split(/\r?\n/)
+    .map((line) => {
+      const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+      if (marker && (!fence || marker[0] === fence[0])) {
+        fence = fence ? undefined : marker;
+        return "";
+      }
+      return fence ? "" : line;
+    })
+    .join("\n");
+}
+
 export function parseReport(text: string): AgentReport {
   const clean = text.trim();
-  const pr = /(?:^|\n)PR:\s*(https:\/\/\S+)/.exec(clean)?.[1] ?? /https:\/\/github\.com\/[^\s)]+\/pull\/\d+/.exec(clean)?.[0];
-  const parts = sections(clean);
-  const reportBody = parts.get("report") ?? parts.get("") ?? clean;
+  const live = withoutFences(clean);
+  const pr = /(?:^|\n)PR:\s*(https:\/\/\S+)/.exec(live)?.[1] ?? /https:\/\/github\.com\/[^\s)]+\/pull\/\d+/.exec(live)?.[0];
+  const parts = sections(live);
+  const reportBody = parts.get("report") ?? parts.get("") ?? live;
   const needsYou = (parts.get("needs you") ?? "").trim();
   const candidates = reportBody
     .split(/\r?\n/)

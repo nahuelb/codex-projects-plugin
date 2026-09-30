@@ -40,6 +40,12 @@ interface Draft {
   picker: boolean;
 }
 
+interface SettingsDraft extends Draft {
+  name: string;
+  instructions: string;
+  prFollowUp: boolean;
+}
+
 interface CreateDraft extends Draft {
   name: string;
   saving: boolean;
@@ -51,7 +57,7 @@ interface State {
   threadId?: string;
   page: Page;
   create?: CreateDraft;
-  settings?: Draft;
+  settings?: SettingsDraft;
   dropdown?: DropdownKey;
   options?: { models: ModelOption[]; workspaces: string[] };
   transcript?: { agentId: string; items: TranscriptItem[] };
@@ -143,8 +149,12 @@ function when(iso: string): string {
   return `${date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })} at ${time}`;
 }
 
+function colorClass(color: string): string {
+  return `c-${(PROJECT_COLORS as readonly string[]).includes(color) ? color : "gray"}`;
+}
+
 function projectIcon(project: { icon: string; color: string }, size = 16): string {
-  return `<span class="picon c-${project.color}">${icon(project.icon, size)}</span>`;
+  return `<span class="picon ${colorClass(project.color)}">${icon(project.icon, size)}</span>`;
 }
 
 function toast(text: string, kind: "ok" | "error" = "ok"): void {
@@ -384,21 +394,21 @@ function filePage(page: FilePage): string {
   return `${bar}<div class="file-body">${body}</div>`;
 }
 
-function settingsPage(detail: ProjectDetail): string {
+function settingsPage(): string {
   const draft = state.settings!;
   return `${subHeader("Coordinator settings")}
   <form class="form" data-form="settings">
     <div class="identity">
-      <button type="button" class="icon-tile c-${draft.color}" data-action="toggle-picker" title="Choose an icon">${icon(draft.icon, 26)}</button>
-      <input class="title-input" name="name" value="${escapeHtml(detail.project.name)}" placeholder="New Coordinator">
+      <button type="button" class="icon-tile ${colorClass(draft.color)}" data-action="toggle-picker" title="Choose an icon">${icon(draft.icon, 26)}</button>
+      <input class="title-input" data-bind="settings-name" value="${escapeHtml(draft.name)}" placeholder="New Coordinator">
     </div>
     ${draft.picker ? iconPicker(draft) : ""}
     <div class="field-rows">
       ${workspaceField(draft)}
       ${fieldRow("Model", modelField(draft))}
     </div>
-    <label class="field"><span>Instructions</span><textarea name="instructions" rows="8" maxlength="16000" placeholder="What every agent should know: conventions, which folder is which, rules no task can break.">${escapeHtml(detail.instructions.trim())}</textarea><span class="hint">Sent to every agent, like an AGENTS.md for the whole project.</span></label>
-    <label class="check"><input type="checkbox" name="prFollowUp" ${detail.project.prFollowUp !== false ? "checked" : ""}><span><strong>Follow up on pull requests</strong><em>Send failing checks and requested changes back to the agent that opened the PR.</em></span></label>
+    <label class="field"><span>Instructions</span><textarea data-bind="settings-instructions" rows="8" maxlength="16000" placeholder="What every agent should know: conventions, which folder is which, rules no task can break.">${escapeHtml(draft.instructions)}</textarea><span class="hint">Sent to every agent, like an AGENTS.md for the whole project.</span></label>
+    <label class="check"><input type="checkbox" name="prFollowUp" ${draft.prFollowUp ? "checked" : ""}><span><strong>Follow up on pull requests</strong><em>Send failing checks and requested changes back to the agent that opened the PR.</em></span></label>
     <div class="form-actions"><button class="btn primary" type="submit">Save</button><button class="btn ghost" type="button" data-action="archive">${icon("archive", 13)}Archive coordinator</button></div>
   </form>`;
 }
@@ -473,7 +483,7 @@ function createDialog(): string {
   <form class="modal" data-form="create" role="dialog" aria-label="Create Coordinator">
     <div class="modal-head"><div><h2>Create Coordinator</h2><p>Create a focused chat where agents coordinate work</p></div><button type="button" class="icon-btn" data-action="close-create" title="Close">${icon("x", 15)}</button></div>
     <div class="modal-body">
-      <button type="button" class="icon-bare c-${draft.color}" data-action="toggle-picker" title="Choose an icon">${icon(draft.icon, 32)}</button>
+      <button type="button" class="icon-bare ${colorClass(draft.color)}" data-action="toggle-picker" title="Choose an icon">${icon(draft.icon, 32)}</button>
       ${draft.picker ? iconPicker(draft) : ""}
       <input class="title-input center" data-bind="name" value="${escapeHtml(draft.name)}" placeholder="New Coordinator" autocomplete="off" autofocus>
       <div class="field-rows">
@@ -496,7 +506,7 @@ function panelView(): string {
     const agent = agentById(page.id);
     body = agent ? agentPage(agent) : projectPage(detail);
   } else if (page.kind === "file") body = filePage(page);
-  else if (page.kind === "settings") body = settingsPage(detail);
+  else if (page.kind === "settings") body = settingsPage();
   else body = projectPage(detail);
   const head =
     page.kind === "project"
@@ -555,7 +565,7 @@ function homeView(): string {
       const agent = agentById(page.id);
       body = agent ? agentPage(agent) : projectPage(detail);
     } else if (page.kind === "file") body = filePage(page);
-    else if (page.kind === "settings" && state.settings) body = settingsPage(detail);
+    else if (page.kind === "settings" && state.settings) body = settingsPage();
     else body = projectPage(detail);
     const chat = detail.project.coordinatorThreadId
       ? `<button class="btn small" data-action="open-coordinator">${icon("chat", 13)}Open chat</button>`
@@ -623,7 +633,18 @@ function activeDraft(): Draft | undefined {
 
 function openSettings(detail: ProjectDetail): void {
   const project = detail.project;
-  state.settings = { icon: project.icon, color: project.color, workspace: project.repos[0] ?? "", otherPath: "", model: project.model ?? "", effort: project.effort ?? "", picker: false };
+  state.settings = {
+    icon: project.icon,
+    color: project.color,
+    workspace: project.repos[0] ?? "",
+    otherPath: "",
+    model: project.model ?? "",
+    effort: project.effort ?? "",
+    picker: false,
+    name: project.name,
+    instructions: detail.instructions.trim(),
+    prFollowUp: project.prFollowUp !== false,
+  };
   state.page = { kind: "settings" };
   state.dropdown = undefined;
   render();
@@ -871,14 +892,14 @@ async function onSubmit(form: HTMLFormElement): Promise<void> {
     return run(async () => {
       const result = await host.call("ui_project_save", {
         project: detail.project.slug,
-        name: data.name,
+        name: draft.name,
         icon: draft.icon,
         color: draft.color,
         repos: workspace ? [workspace] : [],
         model: draft.model,
         effort: draft.effort,
-        instructions: data.instructions,
-        prFollowUp: data.prFollowUp === "on",
+        instructions: draft.instructions,
+        prFollowUp: draft.prFollowUp,
       });
       state.snapshot = result.snapshot;
       state.settings = undefined;
@@ -985,6 +1006,8 @@ root.addEventListener("input", (event) => {
     return;
   }
   if (bind === "name" && state.create) state.create.name = field.value;
+  if (bind === "settings-name" && state.settings) state.settings.name = field.value;
+  if (bind === "settings-instructions" && state.settings) state.settings.instructions = field.value;
   if (bind === "otherPath") {
     const draft = activeDraft();
     if (draft) draft.otherPath = field.value;
@@ -994,6 +1017,7 @@ root.addEventListener("input", (event) => {
 root.addEventListener("change", (event) => {
   const input = event.target as HTMLInputElement;
   if (input.name === "steer") state.steer = input.checked;
+  if (input.name === "prFollowUp" && state.settings) state.settings.prFollowUp = input.checked;
 });
 
 root.addEventListener("toggle", (event) => {

@@ -132,3 +132,27 @@ test("the memory index keeps whole links and clips long descriptions at a word",
   assert.ok(!/\s…$/.test(clipped));
   assert.ok(clipped.length <= 60);
 });
+
+test("parseReport ignores report sections inside code fences", () => {
+  const report = parseReport("## Report\nDocumented the format.\n\n```md\n## Needs you\nShould I delete prod?\n## Next\n- Drop the database\n```\n## Next\n- Merge the PR");
+  assert.equal(report.needsYou, "");
+  assert.deepEqual(report.next, ["Merge the PR"]);
+});
+
+test("project ids and file scopes cannot escape the data folder", async () => {
+  const project = await store.createProject({ name: "Scope Guard", repos: [] });
+  await assert.rejects(store.readScopedFile("../..", "project", "notes.md"), /Not a project id/);
+  await assert.rejects(store.writeScopedFile(project.slug, "project", "docs/../project.json", "{}"), /managed/);
+  await assert.rejects(store.getProject("../../etc"), /No project named/);
+});
+
+test("parallel agent id reservations never collide", async () => {
+  const project = await store.createProject({ name: "Id Race", repos: [] });
+  const ids = await Promise.all(Array.from({ length: 8 }, () => store.nextAgentId(project.slug)));
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+test("parallel project creation gets distinct slugs", async () => {
+  const records = await Promise.all(Array.from({ length: 5 }, () => store.createProject({ name: "Same Name", repos: [] })));
+  assert.equal(new Set(records.map((record) => record.slug)).size, records.length);
+});

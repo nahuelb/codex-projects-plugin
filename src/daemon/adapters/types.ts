@@ -8,6 +8,7 @@ export interface TurnEnd {
   outcome: "completed" | "failed" | "interrupted";
   message: string;
   error?: string;
+  deliveredQueue?: boolean;
 }
 
 export interface AdapterHooks {

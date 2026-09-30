@@ -85,7 +85,17 @@ Pull requests are watched automatically. When an agent's PR gets failing checks 
 - [x] At most 3 recent completions
 ```
 
-Use only a leading `<tldr>` block, bold headers, and `- [ ]` / `- [x]` lines. Put unchecked items first. Put pull request URLs in full.
+Use only a leading `<tldr>` block, bold headers, and `- [ ]` / `- [x]` lines. Put unchecked items first.
+
+The user reads `notes.md` in the Coordinator panel, where links open with one click. Make every reference a Markdown link the first time it appears, in the `<tldr>` and in the body:
+
+- Tickets and issues: `[PAN-142](https://linear.app/…/issue/PAN-142)`, not a bare id. When several tickets share a line, link each one; do not write ranges like `2211–2213`.
+- Pull requests: `[#1015 Fix membership access](https://github.com/org/repo/pull/1015)`, with its number and title.
+- Agents: their id and title, like `a-003 Cache /users`.
+- Plans, documents, and other project files: their absolute path, like `[Rollout plan](/abs/path/plans/rollout.md)`.
+- Boards, dashboards, and other pages: the page itself, like `[Security board](https://linear.app/…)`.
+
+Get the exact URL from the tool or page you read it from. If you do not have a URL, write the id plainly rather than invent one.
 
 ## Memory
 

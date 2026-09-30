@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import path from "node:path";
 import type { ModelOption, Snapshot } from "../shared/types.ts";
 import { VERSION } from "../shared/version.ts";
-import { readJson, writeJsonAtomic } from "../core/fsutil.ts";
+import { readJson, withFileLock, writeJsonAtomic } from "../core/fsutil.ts";
 import { paths, rootDir } from "../core/paths.ts";
 import { getProject, listProjects, projectDetail, projectSummary, updateProject } from "../core/store.ts";
 import { callDaemon, daemonStatus } from "../daemon/client.ts";
@@ -30,13 +30,21 @@ const threadsFile = () => path.join(rootDir(), "run", "threads.json");
 const archiveFile = () => path.join(rootDir(), "run", "archive-pending.json");
 
 async function archiveLater(threadIds: string[]): Promise<void> {
-  const pending = new Set([...((await readJson<string[]>(archiveFile())) ?? []), ...threadIds]);
-  const left: string[] = [];
+  const pending = await withFileLock(archiveFile(), async () => {
+    const all = [...new Set([...((await readJson<string[]>(archiveFile())) ?? []), ...threadIds])];
+    await writeJsonAtomic(archiveFile(), all);
+    return all;
+  });
+  const archived: string[] = [];
   for (const threadId of pending) {
     const result = await callDaemon<{ archived: boolean }>("thread.archive", { threadId }, 30_000).catch(() => ({ archived: false }));
-    if (!result.archived) left.push(threadId);
+    if (result.archived) archived.push(threadId);
   }
-  await writeJsonAtomic(archiveFile(), left);
+  if (!archived.length) return;
+  await withFileLock(archiveFile(), async () => {
+    const left = ((await readJson<string[]>(archiveFile())) ?? []).filter((threadId) => !archived.includes(threadId));
+    await writeJsonAtomic(archiveFile(), left);
+  });
 }
 
 export async function lastProject(): Promise<string | undefined> {
@@ -58,8 +66,10 @@ export async function projectForThread(threadId: string | undefined): Promise<st
 export const coordinatorThreadName = (name: string) => `Project Coordinator: ${name}`;
 
 async function mapThread(threadId: string, slug: string): Promise<void> {
-  const map = (await readJson<Record<string, string>>(threadsFile())) ?? {};
-  if (map[threadId] !== slug) await writeJsonAtomic(threadsFile(), { ...map, [threadId]: slug });
+  await withFileLock(threadsFile(), async () => {
+    const map = (await readJson<Record<string, string>>(threadsFile())) ?? {};
+    if (map[threadId] !== slug) await writeJsonAtomic(threadsFile(), { ...map, [threadId]: slug });
+  });
 }
 
 export async function coordinatorThread(slug: string): Promise<string | undefined> {

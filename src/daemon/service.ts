@@ -6,7 +6,7 @@ import { createWorktree, gitCommonDir, isGitRepo, removeWorktree } from "../core
 import { parseReport } from "../core/markdown.ts";
 import { paths } from "../core/paths.ts";
 import { addInbox, getAgent, getProject, listAgents, listProjects, nextAgentId, saveAgent, touchProject } from "../core/store.ts";
-import { fetchPullRequest, prEvents, type PrEvent } from "./pr.ts";
+import { fetchPullRequest, isPullRequestUrl, prEvents, type PrEvent } from "./pr.ts";
 import { agentKey, type AdapterHooks, type HarnessAdapter, type SendResult, type TurnEnd } from "./adapters/types.ts";
 
 export interface StartAgentInput {
@@ -33,9 +33,19 @@ type AdapterFactory = (hooks: AdapterHooks) => HarnessAdapter;
 export const MAX_WORKING = Number(process.env.PROJECTS_MAX_WORKING || 10);
 const PR_RECHECK_MS = 90_000;
 
+function untrustedNames(names: string[]): string {
+  return names
+    .slice(0, 10)
+    .map((name) => oneLine(name.replace(/[<>`]/g, ""), 80))
+    .join(", ");
+}
+
 const PR_FOLLOW_UP: Partial<Record<PrEvent, (url: string, failing: string[]) => string>> = {
   checks_failed: (url, failing) =>
-    `Your pull request ${url} has failing checks${failing.length ? `: ${failing.join(", ")}` : ""}. Read the failures with \`gh pr checks ${url}\` and \`gh run view --log-failed\`, fix them on your branch, push, and report again.`,
+    [
+      `Your pull request ${url} has failing checks. Read the failures with \`gh pr checks ${url}\` and \`gh run view --log-failed\`, fix them on your branch, push, and report again.`,
+      ...(failing.length ? ["", "<untrusted source=\"github\">", `Failing check names: ${untrustedNames(failing)}`, "</untrusted>"] : []),
+    ].join("\n"),
   changes_requested: (url) =>
     `Your pull request ${url} has review comments requesting changes. Read them with \`gh pr view ${url} --comments\`, address them on your branch, push, and report again.`,
 };
@@ -72,8 +82,13 @@ export class AgentService {
   private persist(agent: AgentRecord): Promise<void> {
     agent.updatedAt = nowIso();
     const snapshot = structuredClone(agent);
-    this.saveChain = this.saveChain.then(() => saveAgent(snapshot)).catch(() => undefined);
-    return this.saveChain;
+    const write = this.saveChain.then(() => saveAgent(snapshot));
+    this.saveChain = write.catch(() => undefined);
+    return write;
+  }
+
+  private workingCount(): number {
+    return [...this.agents.values()].filter((agent) => !agent.resolved && (agent.status === "working" || agent.status === "starting")).length;
   }
 
   private handle(key: string): AgentRecord | undefined {
@@ -133,6 +148,7 @@ export class AgentService {
     agent.activity = undefined;
     agent.lastMessage = end.message || agent.lastMessage;
     if (end.message) agent.report = parseReport(end.message);
+    if (end.deliveredQueue || end.outcome === "interrupted") agent.queued = undefined;
     if (agent.report?.pr && agent.pr?.url !== agent.report.pr) agent.pr = undefined;
     agent.reviewed = false;
     if (end.outcome === "completed") {
@@ -172,7 +188,9 @@ export class AgentService {
         if (agent.status === "working" || agent.status === "starting") {
           agent.status = "stopped";
           agent.activity = undefined;
-          agent.error = "Interrupted because the Project Coordinator service restarted. Send a message to continue.";
+          agent.error = agent.queued?.length
+            ? `Interrupted because the Project Coordinator service restarted. ${agent.queued.length} queued message(s) will be delivered with your next message.`
+            : "Interrupted because the Project Coordinator service restarted. Send a message to continue.";
           await this.persist(agent);
           await addInbox(agent.slug, { kind: "agent_stopped", agentId: agent.id, title: agent.title, summary: agent.error });
           recovered += 1;
@@ -201,7 +219,7 @@ export class AgentService {
     const repo = input.repo?.trim() ? path.resolve(input.repo.trim()) : input.isolation === "folder" ? undefined : project.repos[0];
     const isolation: Isolation = input.isolation ?? (repo ? ((await isGitRepo(repo)) ? "worktree" : "checkout") : "folder");
     if (isolation !== "folder" && !repo) throw new Error(`Isolation "${isolation}" needs a repository. Add one to the project or pass repo.`);
-    const working = [...this.agents.values()].filter((agent) => !agent.resolved && (agent.status === "working" || agent.status === "starting")).length;
+    const working = this.workingCount();
     if (working >= MAX_WORKING) throw new Error(`${working} agents are already working (limit ${MAX_WORKING}). Wait for one to finish or stop one first.`);
     const id = await nextAgentId(project.slug);
     const now = nowIso();
@@ -260,8 +278,16 @@ export class AgentService {
     const agent = await this.load(input.slug, input.id);
     if (agent.resolved) throw new Error(`Agent ${agent.id} is resolved. Start a new agent instead.`);
     if (!input.text?.trim()) throw new Error("The message is empty.");
-    const result = await this.adapters[agent.harness].send(agent, input.text.trim(), input.mode ?? "queue", await this.instructionsFor(agent));
-    agent.followUps.push({ at: nowIso(), text: input.text.trim(), from: input.from ?? "coordinator" });
+    const adapter = this.adapters[agent.harness];
+    const text = input.text.trim();
+    const startsTurn = !adapter.isRunning(agentKey(agent));
+    if (startsTurn && this.workingCount() >= MAX_WORKING) throw new Error(`${MAX_WORKING} agents are already working. Wait for one to finish or stop one first.`);
+    const pending = agent.queued ?? [];
+    const outgoing = startsTurn && pending.length ? [...pending, text].join("\n\n") : text;
+    const result = await adapter.send(agent, outgoing, input.mode ?? "queue", await this.instructionsFor(agent));
+    agent.followUps.push({ at: nowIso(), text, from: input.from ?? "coordinator" });
+    if (result === "queued") agent.queued = [...pending, text];
+    else if (startsTurn) agent.queued = undefined;
     if (result !== "queued") {
       agent.status = "working";
       agent.error = undefined;
@@ -313,11 +339,25 @@ export class AgentService {
     return this.adapters[agent.harness].transcript(agent);
   }
 
+  private async flushDeferred(): Promise<void> {
+    for (const agent of this.agents.values()) {
+      if (!agent.deferred?.length || agent.resolved || this.workingCount() >= MAX_WORKING) continue;
+      const text = agent.deferred.join("\n\n");
+      agent.deferred = undefined;
+      await this.persist(agent);
+      await this.send({ slug: agent.slug, id: agent.id, text, mode: "queue", from: "coordinator" }).catch(async () => {
+        agent.deferred = [text];
+        await this.persist(agent);
+      });
+    }
+  }
+
   async pollPullRequests(force = false): Promise<number> {
     let changed = 0;
+    await this.flushDeferred();
     for (const agent of this.agents.values()) {
-      const url = agent.report?.pr;
-      if (!url || agent.resolved) continue;
+      const url = agent.report?.pr ?? agent.pr?.url;
+      if (!isPullRequestUrl(url) || agent.resolved) continue;
       if (!force && agent.pr && Date.now() - Date.parse(agent.pr.checkedAt) < PR_RECHECK_MS) continue;
       if (agent.pr && (agent.pr.state === "MERGED" || agent.pr.state === "CLOSED")) continue;
       let next;
@@ -331,12 +371,16 @@ export class AgentService {
       await this.persist(agent);
       for (const event of events) {
         changed += 1;
-        const failing = event === "checks_failed" && next.failing.length ? `: ${next.failing.join(", ")}` : "";
+        const failing = event === "checks_failed" && next.failing.length ? `: ${untrustedNames(next.failing)}` : "";
         await addInbox(agent.slug, { kind: PR_INBOX[event].kind, agentId: agent.id, title: agent.title, summary: `${PR_INBOX[event].text}${failing} (${url})` });
         const followUp = PR_FOLLOW_UP[event];
         const project = await getProject(agent.slug).catch(() => undefined);
         if (followUp && project && project.prFollowUp !== false) {
-          await this.send({ slug: agent.slug, id: agent.id, text: followUp(url, next.failing), mode: "queue", from: "coordinator" }).catch(() => undefined);
+          const text = followUp(url, next.failing);
+          await this.send({ slug: agent.slug, id: agent.id, text, mode: "queue", from: "coordinator" }).catch(async () => {
+            agent.deferred = [...(agent.deferred ?? []), text];
+            await this.persist(agent);
+          });
         }
       }
       if (events.length) await touchProject(agent.slug);

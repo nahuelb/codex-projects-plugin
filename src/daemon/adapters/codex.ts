@@ -97,18 +97,27 @@ export class CodexAdapter implements HarnessAdapter {
         if (this.stderrTail.length > 40) this.stderrTail.shift();
       });
       child.on("error", (error) => {
+        if (this.child !== child) return;
         this.ready = undefined;
         reject(error);
       });
-      child.on("exit", (code) => this.onExit(code));
-      readline.createInterface({ input: child.stdout }).on("line", (line) => this.onLine(line));
+      child.on("exit", (code) => {
+        if (this.child === child) this.onExit(code);
+      });
+      readline.createInterface({ input: child.stdout }).on("line", (line) => {
+        if (this.child === child) this.onLine(line);
+      });
       this.request("initialize", { clientInfo: { name: "codex-projects-plugin", title: "Project Coordinator", version: this.version }, capabilities: null }, 30_000)
         .then(() => {
           this.write({ jsonrpc: "2.0", method: "initialized" });
           resolve();
         })
         .catch((error) => {
-          this.ready = undefined;
+          if (this.child === child) {
+            this.child = undefined;
+            this.ready = undefined;
+          }
+          child.kill();
           reject(error);
         });
     });
@@ -223,7 +232,7 @@ export class CodexAdapter implements HarnessAdapter {
         const outcome = turn.status === "completed" ? "completed" : turn.status === "interrupted" ? "interrupted" : "failed";
         const finalText = [...(turn.items ?? [])].reverse().find((item: Json) => item.type === "agentMessage")?.text ?? state.lastMessage;
         const queued = state.queue.splice(0);
-        this.hooks.onTurnEnd(state.agentId, { outcome, message: String(finalText ?? ""), error: turn.error?.message });
+        this.hooks.onTurnEnd(state.agentId, { outcome, message: String(finalText ?? ""), error: turn.error?.message, deliveredQueue: queued.length > 0 && outcome !== "interrupted" });
         if (queued.length && outcome !== "interrupted") {
           void this.startTurn(params.threadId, queued.join("\n\n")).catch((error) =>
             this.hooks.onTurnEnd(state.agentId, { outcome: "failed", message: "", error: String(error.message ?? error) }),

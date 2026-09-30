@@ -133,3 +133,39 @@ test("resolve hides an agent from open groups", async () => {
   assert.equal(store.agentGroup(await store.getAgent(project.slug, agent.id)), "resolved");
   await assert.rejects(service.send({ slug: project.slug, id: agent.id, text: "more" }), /resolved/);
 });
+
+test("queued follow-ups are kept on the record and delivered with the next message after a restart", async () => {
+  const project = await store.createProject({ name: "Queue Keeper" });
+  const agent = await service.start({ slug: project.slug, title: "Long task", task: "Work for a while." });
+  const { result } = await service.send({ slug: project.slug, id: agent.id, text: "Also update the docs." });
+  assert.equal(result, "queued");
+  await service.flush();
+  assert.deepEqual((await store.getAgent(project.slug, agent.id)).queued, ["Also update the docs."]);
+
+  fake.running.delete(agentKey(agent));
+  fake.hooks.onTurnEnd(agentKey(agent), { outcome: "failed", message: "", error: "app-server exited" });
+  await settle();
+  await service.flush();
+  assert.deepEqual((await store.getAgent(project.slug, agent.id)).queued, ["Also update the docs."]);
+
+  fake.sent.length = 0;
+  await service.send({ slug: project.slug, id: agent.id, text: "Continue." });
+  assert.equal(fake.sent.at(-1), "Also update the docs.\n\nContinue.");
+  await service.flush();
+  assert.equal((await store.getAgent(project.slug, agent.id)).queued, undefined);
+});
+
+test("follow-ups that would start a turn respect the working limit", async () => {
+  const { MAX_WORKING } = await import("../src/daemon/service.ts");
+  const project = await store.createProject({ name: "Capacity" });
+  const idle = await service.start({ slug: project.slug, title: "Idle one", task: "Finish fast." });
+  fake.finish(idle, "## Report\nDone.");
+  await settle();
+  const busy: AgentRecord[] = [];
+  const working = () => [...fake.running].length;
+  while (working() < MAX_WORKING) busy.push(await service.start({ slug: project.slug, title: `Busy ${busy.length}`, task: "Keep working." }).catch(() => undefined as never));
+  await assert.rejects(service.send({ slug: project.slug, id: idle.id, text: "One more thing." }), /already working/);
+  for (const agent of busy) if (agent) fake.finish(agent, "## Report\nStopped.");
+  await settle();
+  await service.flush();
+});

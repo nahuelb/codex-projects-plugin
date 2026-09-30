@@ -1,4 +1,4 @@
-import { readdir, rename, rm, stat } from "node:fs/promises";
+import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import {
@@ -21,7 +21,10 @@ import {
 import {
   ensureDir,
   exists,
+  createExclusive,
   insideRoot,
+  insideRootReal,
+  withFileLock,
   mtimeIso,
   nowIso,
   readJson,
@@ -31,7 +34,7 @@ import {
   writeTextAtomic,
 } from "./fsutil.ts";
 import { parseFrontmatter, parseNotes, renderFrontmatter } from "./markdown.ts";
-import { PROJECT_SUBDIRS, paths } from "./paths.ts";
+import { PROJECT_SUBDIRS, checkSlug, paths } from "./paths.ts";
 
 export const MEMORY_TYPES = ["user", "feedback", "project", "reference"] as const;
 export const MEMORY_INDEX_MAX_LINES = 200;
@@ -79,21 +82,43 @@ export async function listProjects(includeArchived = false): Promise<ProjectReco
   const entries = await readdir(paths.projects(), { withFileTypes: true });
   const records: ProjectRecord[] = [];
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const record = await readJson<ProjectRecord>(paths.projectJson(entry.name));
+    if (!entry.isDirectory() || !isSlug(entry.name)) continue;
+    const record = await readProjectRecord(entry.name);
     if (record && (includeArchived || !record.archived)) records.push(record);
   }
   return records.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-export async function getProject(slug: string): Promise<ProjectRecord> {
+function isSlug(value: string): boolean {
+  try {
+    checkSlug(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readProjectRecord(slug: string): Promise<ProjectRecord | undefined> {
   const record = await readJson<ProjectRecord>(paths.projectJson(slug));
+  if (!record) return undefined;
+  return {
+    ...record,
+    slug,
+    name: String(record.name ?? slug),
+    icon: pickIcon(record.icon, "layers"),
+    color: pickColor(record.color, "gray"),
+    repos: Array.isArray(record.repos) ? record.repos.filter((repo) => typeof repo === "string") : [],
+  };
+}
+
+export async function getProject(slug: string): Promise<ProjectRecord> {
+  const record = isSlug(slug) ? await readProjectRecord(slug) : undefined;
   if (!record) throw new Error(`No project named "${slug}". Use project_list to see projects.`);
   return record;
 }
 
 export async function resolveProject(slugOrName: string): Promise<ProjectRecord> {
-  const direct = await readJson<ProjectRecord>(paths.projectJson(slugify(slugOrName)));
+  const direct = await readProjectRecord(slugify(slugOrName));
   if (direct) return direct;
   const all = await listProjects(true);
   const lowered = slugOrName.trim().toLowerCase();
@@ -106,12 +131,11 @@ export async function createProject(input: NewProjectInput): Promise<ProjectReco
   await ensureRoot();
   const name = input.name.trim();
   if (!name) throw new Error("A project needs a name.");
-  let slug = slugify(name, 32);
-  for (let n = 2; await exists(paths.project(slug)); n += 1) slug = `${slugify(name, 28)}-${n}`;
   const repos = normalizeRepos(input.repos);
   for (const repo of repos) {
     if (!(await exists(repo))) throw new Error(`Repository folder not found: ${repo}`);
   }
+  const slug = await reserveSlug(name);
   const now = nowIso();
   const record: ProjectRecord = {
     slug,
@@ -134,7 +158,25 @@ export async function createProject(input: NewProjectInput): Promise<ProjectReco
   return record;
 }
 
+async function reserveSlug(name: string): Promise<string> {
+  await ensureDir(paths.projects());
+  for (let n = 1; n < 1000; n += 1) {
+    const slug = n === 1 ? slugify(name, 32) : `${slugify(name, 28)}-${n}`;
+    try {
+      await mkdir(paths.project(slug));
+      return slug;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+  }
+  throw new Error(`Could not find a free id for "${name}".`);
+}
+
 export async function updateProject(slug: string, patch: ProjectPatch): Promise<ProjectRecord> {
+  return withFileLock(paths.projectJson(slug), () => applyProjectPatch(slug, patch));
+}
+
+async function applyProjectPatch(slug: string, patch: ProjectPatch): Promise<ProjectRecord> {
   const current = await getProject(slug);
   const repos = patch.repos ? normalizeRepos(patch.repos) : current.repos;
   for (const repo of repos) {
@@ -160,8 +202,10 @@ export async function updateProject(slug: string, patch: ProjectPatch): Promise<
 }
 
 export async function touchProject(slug: string): Promise<void> {
-  const current = await readJson<ProjectRecord>(paths.projectJson(slug));
-  if (current) await writeJsonAtomic(paths.projectJson(slug), { ...current, updatedAt: nowIso() });
+  await withFileLock(paths.projectJson(slug), async () => {
+    const current = await readJson<ProjectRecord>(paths.projectJson(slug));
+    if (current) await writeJsonAtomic(paths.projectJson(slug), { ...current, updatedAt: nowIso() });
+  });
 }
 
 export const readInstructions = (slug: string) => readText(paths.instructions(slug));
@@ -269,8 +313,14 @@ export async function saveAgent(agent: AgentRecord): Promise<void> {
 }
 
 export async function nextAgentId(slug: string): Promise<string> {
-  const ids = (await listAgents(slug)).map((agent) => Number(/^a-(\d+)$/.exec(agent.id)?.[1] ?? 0));
-  return `a-${String(Math.max(0, ...ids) + 1).padStart(3, "0")}`;
+  const dir = paths.agentsDir(slug);
+  await ensureDir(dir);
+  const taken = (await readdir(dir)).map((file) => Number(/^a-(\d+)\.(?:json|reserved)$/.exec(file)?.[1] ?? 0));
+  for (let next = Math.max(0, ...taken) + 1; next < 1_000_000; next += 1) {
+    const id = `a-${String(next).padStart(3, "0")}`;
+    if (await createExclusive(path.join(dir, `${id}.reserved`), String(process.pid))) return id;
+  }
+  throw new Error("No free agent id.");
 }
 
 export function agentGroup(agent: AgentRecord): AgentGroup {
@@ -371,15 +421,16 @@ export interface ScopedFile {
 
 const MAX_EDITABLE_BYTES = 512 * 1024;
 
-function scopedPath(slug: string, scope: FileScope, relative: string): string {
+async function scopedPath(slug: string, scope: FileScope, relative: string): Promise<string> {
   const root = scope === "user" ? paths.user() : paths.project(slug);
-  const first = relative.split(/[\\/]/).filter(Boolean)[0] ?? "";
+  const file = await insideRootReal(root, relative);
+  const first = path.relative(root, file).split(path.sep)[0] ?? "";
   if (scope === "project" && HIDDEN_PROJECT_PATHS.has(first)) throw new Error(`${relative} is managed by Project Coordinator.`);
-  return insideRoot(root, relative);
+  return file;
 }
 
 export async function readScopedFile(slug: string, scope: FileScope, relative: string): Promise<ScopedFile> {
-  const file = scopedPath(slug, scope, relative);
+  const file = await scopedPath(slug, scope, relative);
   const info = await stat(file);
   if (!info.isFile()) throw new Error(`${relative} is not a file.`);
   const base = { path: file, size: info.size, updatedAt: info.mtime.toISOString() };
@@ -388,7 +439,7 @@ export async function readScopedFile(slug: string, scope: FileScope, relative: s
 }
 
 export async function writeScopedFile(slug: string, scope: FileScope, relative: string, text: string, expectedUpdatedAt?: string): Promise<ScopedFile> {
-  const file = scopedPath(slug, scope, relative);
+  const file = await scopedPath(slug, scope, relative);
   if (Buffer.byteLength(text) > MAX_EDITABLE_BYTES) throw new Error("The file is too large to save here.");
   if (expectedUpdatedAt && (await exists(file))) {
     const current = (await stat(file)).mtime.toISOString();

@@ -1,5 +1,6 @@
 import http from "node:http";
-import { rm, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
+import { createExclusive } from "../core/fsutil.ts";
 import { widenPath } from "../core/env.ts";
 import { ensureRoot } from "../core/store.ts";
 import { paths } from "../core/paths.ts";
@@ -67,10 +68,38 @@ async function shutdown(code: number): Promise<void> {
   await service.dispose().catch(() => undefined);
   await rm(paths.socket(), { force: true });
   await rm(paths.pidFile(), { force: true });
+  await rm(paths.lockFile(), { force: true });
   process.exit(code);
 }
 
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+async function acquireLock(): Promise<boolean> {
+  const deadline = Date.now() + 4_000;
+  for (;;) {
+    if (await createExclusive(paths.lockFile(), `${process.pid}\n`)) return true;
+    const owner = Number((await readFile(paths.lockFile(), "utf8").catch(() => "")).trim());
+    if (!owner || !alive(owner)) {
+      await rm(paths.lockFile(), { force: true });
+      continue;
+    }
+    if (Date.now() > deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 await ensureRoot();
+if (!(await acquireLock())) {
+  console.log(`${new Date().toISOString()} coordd ${VERSION} found another service running; exiting`);
+  process.exit(0);
+}
 await rm(paths.socket(), { force: true });
 const recovered = await service.recover();
 server.listen(paths.socket(), async () => {

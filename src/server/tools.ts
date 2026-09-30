@@ -367,7 +367,7 @@ export function registerTools(server: McpServer, html: string): void {
     {
       title: "Write notes",
       description:
-        "Replace the project's notes.md, the status board the user sees. Format: a leading <tldr>...</tldr> block with up to 5 short lines, then bold headers and '- [ ]' / '- [x]' checkbox lines only. Unchecked items first; keep at most 3 recent completed items.",
+        "Replace the project's notes.md, the status board the user sees. Format: a leading <tldr>...</tldr> block with up to 5 short lines, then bold headers and '- [ ]' / '- [x]' checkbox lines only. Unchecked items first; keep at most 3 recent completed items. Link every ticket, pull request, file, and page as a Markdown link the first time it appears, using its real URL or absolute path.",
       inputSchema: z.object({ project: projectArg, content: z.string() }),
       annotations: writes,
     },

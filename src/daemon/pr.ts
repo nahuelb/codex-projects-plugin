@@ -21,7 +21,14 @@ export function summarizeChecks(checks: Check[]): Pick<PullRequestStatus, "check
   return { checks: pending ? "pending" : "passing", failing: [] };
 }
 
+const PULL_REQUEST_URL = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/;
+
+export function isPullRequestUrl(url: string | undefined): url is string {
+  return typeof url === "string" && PULL_REQUEST_URL.test(url);
+}
+
 export async function fetchPullRequest(url: string, gh = process.env.PROJECTS_GH_BIN || "gh"): Promise<PullRequestStatus> {
+  if (!isPullRequestUrl(url)) throw new Error(`Not a GitHub pull request URL: ${url}`);
   const { stdout } = await run(gh, ["pr", "view", url, "--json", "state,isDraft,reviewDecision,statusCheckRollup"], { timeout: 30_000 });
   const data = JSON.parse(stdout);
   const state = ["OPEN", "MERGED", "CLOSED"].includes(data.state) ? data.state : "UNKNOWN";
