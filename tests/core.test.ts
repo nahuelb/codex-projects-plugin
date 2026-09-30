@@ -120,3 +120,15 @@ test("scoped file writes refuse stale edits and managed paths", async () => {
   await assert.rejects(store.writeScopedFile(project.slug, "project", "project.json", "{}"), /managed/);
   await assert.rejects(store.writeScopedFile(project.slug, "project", "../x.md", "x"), /escapes/);
 });
+
+test("the memory index keeps whole links and clips long descriptions at a word", async () => {
+  const project = await store.createProject({ name: "Memory Index", repos: [] });
+  const description = "Canonical Linear project, audit records, and source conversations for the security effort across every app and service we run in production";
+  await store.writeMemory(project.slug, { name: "Security project sources", description, type: "reference", body: "Body." });
+  const index = await readFile(paths.memoryIndex(project.slug), "utf8");
+  assert.match(index, /^- \[Security project sources\]\(memory\/security-project-sources\.md\) — Canonical/);
+  const clipped = store.clipDescription(description, 60);
+  assert.ok(clipped.endsWith("…"));
+  assert.ok(!/\s…$/.test(clipped));
+  assert.ok(clipped.length <= 60);
+});

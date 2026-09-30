@@ -202,8 +202,18 @@ export async function readMemoryFile(slug: string, file: string): Promise<string
   return readText(insideRoot(paths.memoryDir(slug), file));
 }
 
-async function rebuildMemoryIndex(slug: string): Promise<void> {
-  const lines = (await listMemory(slug)).map((entry) => `- [${entry.name}](memory/${entry.file}) — ${entry.description}`.slice(0, 150));
+const MEMORY_DESCRIPTION_MAX = 160;
+
+export function clipDescription(text: string, max = MEMORY_DESCRIPTION_MAX): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  if (line.length <= max) return line;
+  const cut = line.slice(0, max - 1);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.—-]+$/, "")}…`;
+}
+
+export async function rebuildMemoryIndex(slug: string): Promise<void> {
+  const lines = (await listMemory(slug)).map((entry) => `- [${entry.name}](memory/${entry.file}) — ${clipDescription(entry.description)}`);
   await writeTextAtomic(paths.memoryIndex(slug), lines.slice(0, MEMORY_INDEX_MAX_LINES).join("\n") + (lines.length ? "\n" : ""));
 }
 
